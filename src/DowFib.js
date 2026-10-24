@@ -295,3 +295,23 @@ function claspJpxHistory() {
 
 // 診断用: 相場マクロが使う取り込み口（JPX直取得→Drive）を直接呼んで戻り値を返す。
 function claspImportTseTry() { return importTseMarginFile_(); }
+
+// 診断用（読み取り専用）: J-Quants V2 の各エンドポイントが現プランでどの期間まで返すかを調べる。
+function claspJqProbe() {
+  const key = PropertiesService.getScriptProperties().getProperty('JQUANTS_API_KEY');
+  if (!key) return { error: 'JQUANTS_API_KEY 未設定' };
+  const tests = [
+    ['markets/margin-interest', { code: '72030' }],
+    ['markets/margin-interest', { from: '2025-10-01', to: '2025-10-31' }],
+    ['markets/short-ratio', { from: '2025-10-01', to: '2025-10-31' }],
+    ['markets/margin-alert', { code: '72030' }],
+    ['equities/bars/daily', { code: '72030', from: '2025-10-01', to: '2025-10-10' }],
+  ];
+  return tests.map(([p, q]) => {
+    try {
+      const rows = jqGet_(p, q, key) || [];
+      const ds = rows.map(r => String(r.Date || r.PubDate || r.ApplDate || '')).filter(String).sort();
+      return { p, q: JSON.stringify(q), n: rows.length, min: ds[0], max: ds[ds.length - 1], keys: rows[0] ? Object.keys(rows[0]).join(',') : '' };
+    } catch (e) { return { p, q: JSON.stringify(q), err: String(e.message).slice(0, 120) }; }
+  });
+}

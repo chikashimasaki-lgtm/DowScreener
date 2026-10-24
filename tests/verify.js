@@ -61,7 +61,7 @@ const EXPORTS = [
   'signalStrength_', 'parseSignalNames_', 'suggestWeight_', 'patternPoints_',
   'marginRegime_', 'regimeFactor_', 'nsRatioTrend_', 'vixMacdSignal_', 'checkMarketConditions_',
   'marginRatioTrend_', 'shiftMarginRatioHistory_', 'marginRatioLabel_', 'parseYahooJpMarginDate_',
-  'parseTseMarginGrid_', 'parseNikkeiEpsHtml_', 'selloffFrequency_', 'macroValueLabel_',
+  'parseTseMarginGrid_', 'parseJpxMtcurrentGrid_', 'parseJpxMtcurrentLinks_', 'parseNikkeiEpsHtml_', 'selloffFrequency_', 'macroValueLabel_',
   'filterCalendarToUniverse_', 'calendarStatusLabel_', 'edinetExtractArray_', 'calendarMapFromEntries_',
   'pickForeignFlow_', 'extractProfit_',
   'tickSize_', 'roundToTick_', 'priceLimit_', 'dowSwings_', 'pullbackLow_', 'buildOrderPlan_',
@@ -88,6 +88,7 @@ ${read('Code.js')}
 ${read('DowFib.js')}
 ${read('Bloomberg.js')}
 ${read('MarketMacro.js')}
+${read('JpxMargin.js')}
 ${read('MLWeights.js')}
 ${read('WebMenu.js')}
 ${read('AiRecommend.js')}
@@ -497,6 +498,24 @@ console.log('\n【8】急落の7条件 — 未取得の項目で点灯させな�
 }
 
 /* ── 9. 東証信用残（mtseisan）の読み取り ─────────────────────────────────── */
+
+console.log('\n【9b】parseJpxMtcurrentGrid_ — JPX週次 mtcurrent.xlsx（2026/10/16申込み分の実値）');
+{
+  const grid = [
+    [new Date('2026-10-16T00:00:00+09:00'), '', ''],
+    ['東京証券取引所株式部', '', ''],
+    ['信用取引残高合計', '株数Shs.', 366263, -642, 3734445, -96177, 366259, -637, 3731899, -96072],
+    ['', '金額Val.', 667054, -95000, 6664007, -44051, 667050, -94996, 6660778, -44100],
+  ];
+  const r = M.parseJpxMtcurrentGrid_(grid);
+  eq(r.sellOku, 6671, '東京の売残（百万円→億円）が6,671億円');
+  eq(r.sellChgOku, -950, '売残の前週比が-950億円');
+  eq(r.buyOku, 66608, '東京の買残が66,608億円');
+  eq(r.ratioShares, 10.19, '信用倍率（株数）が10.19倍');
+  eq(M.parseJpxMtcurrentGrid_([['信用取引残高合計', '株数', 1, 2]]), null, '行が足りなければ null');
+  const links = M.parseJpxMtcurrentLinks_('<a href="/a/20261009_mtcurrent.xlsx"></a><a href="/a/20261016_mtcurrent.xlsx"></a><a href="/a/20261016_mtcurrent.xlsx"></a>');
+  eq(links.map(l => l.ymd).join(','), '20261016,20261009', 'リンクは新しい順・重複なし');
+}
 
 console.log('\n【9】parseTseMarginGrid_ — JPX二市場信用取引現在高');
 {
