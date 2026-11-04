@@ -1409,7 +1409,6 @@ function writeStatsSheet_(map) {
   sh.getRange(2, 1, 1, header.length)
     .setBackground('#141a33').setFontColor('#ffffff').setFontWeight('bold')
     .setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sh.setFrozenRows(2);
   sh.setRowHeight(1, 44);
   autoFit_(sh, header.length);
   sh.setTabColor('#4a90d9');
@@ -2089,9 +2088,9 @@ function writePlanSheet_(targets) {
       .setRanges([kind]).build(),
   ]);
   sh.getRange(1, 1, n + 1, PLAN_HEADERS_.length).createFilter();
-  // 見出し行だけ固定する。以前は「区分・コード・銘柄名」の3列も固定していたが、スマホでは
+  // 行・列は固定しない（全アプリ方針 2026-11-04）。以前は「区分・コード・銘柄名」の3列も固定していたが、スマホでは
   // 固定列が画面の大半を占めて横スクロールの邪魔になるため外した（2026-10-19）。既存シートも次の書き出しで外れる
-  sh.setFrozenRows(1);
+  sh.setFrozenRows(0);
   sh.setFrozenColumns(0);
   sh.setRowHeightsForced(2, n, 42);
   if (isNewSheet) trimSheet_(sh, undefined, 13);   // 新規作成時だけ空白を削る（M1まで13列は残す。webStatus が13列を読む）

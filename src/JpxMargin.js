@@ -74,7 +74,6 @@ function ensureJpxMarginSheet_() {
   sh = ss.insertSheet(JPX_MARGIN.SHEET);
   const H = JPX_MARGIN.HEADER;
   sh.getRange(1, 1, 1, H.length).setValues([H]).setFontWeight('bold').setBackground('#37474F').setFontColor('#FFFFFF');
-  sh.setFrozenRows(1);
   sh.setColumnWidths(1, H.length, 110);
   sh.setTabColor(JPX_MARGIN.TAB_COLOR);
   sh.getRange(2, 2, 500, 5).setNumberFormat('#,##0');

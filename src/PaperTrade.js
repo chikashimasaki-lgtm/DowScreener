@@ -130,7 +130,7 @@ function paperSheet_() {
   ensureSheetSize_(sh, 2, PT_HEADERS_.length + 4);
   sh.getRange(1, 1, 1, PT_HEADERS_.length).setValues([PT_HEADERS_]);
   styleSheet_(sh, PT_HEADERS_.length, '#141a33', '#eef1fb');
-  sh.setFrozenRows(1);
+  sh.setFrozenRows(0);
   sh.setFrozenColumns(0);
   // 集計は表の右に置く（表を壊さず、スマホで縦スクロールの邪魔にならない）
   const state = '$I$2:$I', pnl = '$L$2:$L', pct = '$M$2:$M';
