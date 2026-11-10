@@ -31,7 +31,10 @@ const AI_TOP_N_ = 3;
 // メニューから呼ぶ入口。「売買プラン」シートを読み、Geminiでコメントを生成してメモ欄へ書く。
 // メニューの入口なので末尾「_」を付けない（「_」は内部ヘルパの目印として使い分ける）。
 // エディタの実行ドロップダウンにも出るので、手で動かして切り分けたいときに楽。
-function generateAiSummary() {
+// 実行記録（共通モジュール RunLog.js）で包んだ入口。自動トリガーには繋げない（手動のみ）。
+// 包む理由: これまでは押した事実も「対象0件で早期return」も「APIキー未設定で例外」も跡が残らなかった。
+function generateAiSummary() { return runLogged_('AI推奨コメント', () => generateAiSummaryRun_()); }
+function generateAiSummaryRun_() {
   const ss = SpreadsheetApp.getActive();
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY がスクリプトプロパティに未設定です');
@@ -131,10 +134,33 @@ function readMacroContextForAi_(ss) {
     const sh = ss.getSheetByName(MACRO.CALENDAR_SHEET);
     if (sh && sh.getLastRow() >= 2) {
       const vals = sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues();
-      vals.forEach(r => { if (r[0]) ctx.earningsByCode[String(r[0])] = r[2] + '（' + r[3] + '）'; });
+      ctx.earningsByCode = earningsByCodeFromRows_(vals, Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'));
     }
   } catch (e) { Logger.log('AI要約: 決算カレンダーの読み取りに失敗 ' + e.message); }
   return ctx;
+}
+
+// 決算カレンダーシートの行（[コード, 銘柄名, 発表予定日, 確度]）から、コード→「日付（確度）」を作る純関数。
+// 発表予定日が今日より前の行は除外する（シートに前日までの行が残っていても、発表済みを
+// 「決算が近い」とAIに渡さないため）。今日の行は残す。日付が読めない行も除外はしない（従来どおり）。
+// 読み取り側だけの処理で、シートへの書き込み（writeEarningsCalendarSheet_）は変えない。
+// todayKey は 'yyyy-MM-dd'（JST）。日付セルは Date でも文字列（yyyy-mm-dd / yyyy/mm/dd）でも受ける。
+function earningsByCodeFromRows_(vals, todayKey) {
+  const out = {};
+  (vals || []).forEach(r => {
+    if (!r[0]) return;
+    const key = calendarDateKey_(r[2]);
+    if (key && todayKey && key < todayKey) return;
+    out[String(r[0])] = r[2] + '（' + r[3] + '）';
+  });
+  return out;
+}
+
+// 日付セルを 'yyyy-MM-dd' にそろえる。読めなければ ''。
+function calendarDateKey_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, 'Asia/Tokyo', 'yyyy-MM-dd');
+  const m = String(v == null ? '' : v).match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : '';
 }
 
 // Geminiに渡す日本語プロンプトを組み立てる。JSON（コード→コメント）で返させる。
