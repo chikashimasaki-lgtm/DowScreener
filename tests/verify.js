@@ -1377,6 +1377,7 @@ console.log('\n【34】急落サイン — 取得失敗・古い条件は「正�
   eq(M.summarizeConditions_(empty), { lit: 0, judged: 0, unknown: 7, total: 7 }, 'データが空なら全件不明（0/7の「落ち着いている」と読ませない）');
   eq(M.checkMarketConditions_(Object.assign({}, fresh, { vix_macd_signal: 'NONE' }))[5].status, 'unknown', 'VIXが判定不能(NONE)なら不明');
   eq(M.checkMarketConditions_(Object.assign({}, fresh, { ns_ratio_trend: null }))[2].status, 'unknown', 'NS倍率が取得失敗(null)なら不明');
+  ok_(/n225\.length > MACRO\.NS_WINDOW && spx\.length > MACRO\.NS_WINDOW\) \? nsRatioTrend_\(n225, spx, MACRO\.NS_WINDOW\) : null/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'MarketMacro.js'), 'utf8')), 'NS倍率の終値が足りない（取得失敗で空配列）ときは null＝不明にする配線がある（文面確認）');
   eq(M.checkMarketConditions_(Object.assign({}, fresh, { foreign_net_oku: 0 }))[4].status, 'ok', '海外投資家0は値あり（不明にしない）');
 }
 {

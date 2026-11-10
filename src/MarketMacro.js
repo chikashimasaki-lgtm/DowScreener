@@ -893,7 +893,9 @@ function updateMarketMacroRun_() {
   let ns = 'FLAT', vix = 'NONE';
   try {
     const n225 = fetchIndexCloses_('^N225'), spx = fetchIndexCloses_('^GSPC');
-    ns = nsRatioTrend_(n225, spx, MACRO.NS_WINDOW);
+    // 終値が取れない（Yahoo 429 等で空配列）と nsRatioTrend_ は 'FLAT' を返し「正常」に見える。
+    // 比べる本数が足りないときは判定しない（null＝急落サイン表で「不明」）
+    ns = (n225.length > MACRO.NS_WINDOW && spx.length > MACRO.NS_WINDOW) ? nsRatioTrend_(n225, spx, MACRO.NS_WINDOW) : null;
   } catch (e) { ns = null; Logger.log('NS倍率取得失敗: ' + e.message); }   // null＝急落サイン表では「不明」
   try { vix = vixMacdSignal_(fetchIndexCloses_('^VIX')); } catch (e) { Logger.log('VIX取得失敗: ' + e.message); }
 
