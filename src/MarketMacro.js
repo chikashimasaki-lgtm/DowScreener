@@ -162,6 +162,7 @@ function marginRatioLabel_(cur, prev, trend) {
 // Sho「日本株急落の7条件」判定（提供Pythonと同型）。data は数値/状態のマップ。
 // 各要素 { key, condition, value, alert, status, reason }。
 //   status: 'lit'=点灯 / 'ok'=正常 / 'unknown'=不明（判定できない）。alert は status==='lit' と同じ。
+//   staleLit: 不明の条件が、その古い値のまま判定すれば点灯だったか（表示専用。点灯数には数えない）。
 // 「不明」は、値が無い・取得失敗・古い（data.stale_by_cond に条件キー→理由で渡す）条件。
 // 古い値や欠測を「正常」と数えると「落ち着いている」と読めてしまうため、点灯にも正常にも数えない。
 // ※表示専用。買い推奨の判定（DowFib 等）はこの結果を読まない（仕様の禁止事項）。
@@ -171,7 +172,8 @@ function checkMarketConditions_(data) {
   const staleBy = data.stale_by_cond || {};
   const mk = (key, condition, value, alert, isMissing) => {
     const reason = staleBy[key] || (isMissing ? '値なし' : '');
-    if (reason) return { key, condition, value, alert: false, status: 'unknown', reason };
+    // 古い／失敗の値でも、判定すれば点灯していた場合は staleLit=true で残す（点灯数には数えない。状態列で見えるようにするため）
+    if (reason) return { key, condition, value, alert: false, status: 'unknown', reason, staleLit: !!alert };
     return { key, condition, value, alert: !!alert, status: alert ? 'lit' : 'ok', reason: '' };
   };
   return [
@@ -213,7 +215,12 @@ function conditionSummaryLabel_(sum) {
 // 状態列の表示。理由があれば「不明（日付未記入）」の形で出す。
 function conditionStatusLabel_(c) {
   if (c.status === 'lit') return '⚠ 点灯';
-  if (c.status === 'unknown') return '不明' + (c.reason ? '（' + c.reason + '）' : '');
+  if (c.status === 'unknown') {
+    const parts = [];
+    if (c.reason) parts.push(c.reason);
+    if (c.staleLit) parts.push('古い値では点灯');   // 警告を隠さない。点灯数には数えない
+    return '不明' + (parts.length ? '（' + parts.join('・') + '）' : '');
+  }
   return '正常';
 }
 

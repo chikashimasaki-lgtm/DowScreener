@@ -1365,7 +1365,10 @@ console.log('\n【34】急落サイン — 取得失敗・古い条件は「正�
   const sum = M.summarizeConditions_(stale);
   eq(sum, { lit: 0, judged: 4, unknown: 3, total: 7 }, '不明3件は分母（判定できた）から外れる');
   eq(M.conditionSummaryLabel_(sum), '点灯0 / 判定できた4（不明3）', '表示は「点灯N / 判定できたM（不明K）」');
-  eq(M.conditionStatusLabel_(stale[3]), '不明（96日前）', '状態列に理由を添える');
+  eq(M.conditionStatusLabel_(stale[3]), '不明（96日前・古い値では点灯）', '状態列に理由を添え、古い値のままなら点灯していた事実も残す');
+  eq(M.conditionStatusLabel_(stale[4]), '不明（取得失敗: JQUANTS_API_KEY未設定・古い値では点灯）', '失敗でも、古い値で点灯していたなら併記');
+  eq(M.conditionStatusLabel_(M.checkMarketConditions_(Object.assign({}, fresh, { stale_by_cond: { '4_nikkei_eps': '96日前' } }))[3]), '不明（96日前）', '古い値が正常側なら「古い値では点灯」は付けない');
+  eq(M.summarizeConditions_(stale).lit, 0, '古い値で点灯だったものも点灯数には数えない');
   eq(M.conditionStatusLabel_(stale[0]), '正常', '正常の表示は従来どおり');
   // 新鮮な点灯は点灯のまま数える
   const mixed = M.checkMarketConditions_(Object.assign({}, fresh, {
@@ -1448,7 +1451,7 @@ console.log('\n【34】急落サイン — 取得失敗・古い条件は「正�
   ok_(grid && grid[0][1].indexOf('点灯1 / 判定できた6（不明1）') === 0, 'シートの要約行が「点灯1 / 判定できた6（不明1）」で始まる');
   ok_(grid[0][1].indexOf('落ち着いている') < 0, '不明があるときは「落ち着いている」の目安を出さない');
   const eps = grid.find(r => String(r[0]).indexOf('日経平均EPS') === 0);
-  eq(eps.slice(1), ['不明（96日前）', '下落'], 'EPS行は状態が「不明（96日前）」、値は参考として残す');
+  eq(eps.slice(1), ['不明（96日前・古い値では点灯）', '下落'], 'EPS行は状態が「不明（96日前）」、値は参考として残す');
   eq(grid.find(r => String(r[0]).indexOf('信用倍率') === 0)[1], '⚠ 点灯', '新鮮な点灯は従来どおり');
 }
 
