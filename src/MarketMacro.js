@@ -5,7 +5,7 @@
 //    (Driveのmtseisan*.xls)・日経EPS(stock-marketdata.com)・海外投資家 現物ネット
 //    (J-Quants /equities/investor-types)・好決算sell-on-news(J-Quants fins/details×equities/bars/daily)。
 //    各取得は失敗/サンプル不足/プラン遅延時に「相場マクロ」シートの手入力へフォールバック。
-//  ・7条件の点灯をN/7で「相場マクロ」シートの下段（入力欄の下、急落サイン節）に出力。
+//  ・7条件の点灯を「点灯N / 判定できたM（不明K）」で「相場マクロ」シートの下段（入力欄の下、急落サイン節）に出力。
 //    2026-08-21、以前は別シート「急落サイン」だったが、入力と結果を1画面で見られるよう統合した。
 //  ・条件1・2（売残・信用倍率）から地合い(SHORT_COVER/NEUTRAL/SUPPLY_RISK)を算出し、
 //    Code.js の finalizeSignals_ がシグナルの強さ(★)スコアに反映する。
@@ -160,43 +160,97 @@ function marginRatioLabel_(cur, prev, trend) {
 }
 
 // Sho「日本株急落の7条件」判定（提供Pythonと同型）。data は数値/状態のマップ。
-// 各要素 { key, condition, value, alert }（alert=true が急落サイン点灯）。
+// 各要素 { key, condition, value, alert, status, reason }。
+//   status: 'lit'=点灯 / 'ok'=正常 / 'unknown'=不明（判定できない）。alert は status==='lit' と同じ。
+//   staleLit: 不明の条件が、その古い値のまま判定すれば点灯だったか（表示専用。点灯数には数えない）。
+// 「不明」は、値が無い・取得失敗・古い（data.stale_by_cond に条件キー→理由で渡す）条件。
+// 古い値や欠測を「正常」と数えると「落ち着いている」と読めてしまうため、点灯にも正常にも数えない。
+// ※表示専用。買い推奨の判定（DowFib 等）はこの結果を読まない（仕様の禁止事項）。
 function checkMarketConditions_(data) {
   const g = (k, d) => (data[k] != null && data[k] !== '' ? data[k] : d);
+  const missing = (k) => data[k] == null || data[k] === '';
+  const staleBy = data.stale_by_cond || {};
+  const mk = (key, condition, value, alert, isMissing) => {
+    const reason = staleBy[key] || (isMissing ? '値なし' : '');
+    // 古い／失敗の値でも、判定すれば点灯していた場合は staleLit=true で残す（点灯数には数えない。状態列で見えるようにするため）
+    if (reason) return { key, condition, value, alert: false, status: 'unknown', reason, staleLit: !!alert };
+    return { key, condition, value, alert: !!alert, status: alert ? 'lit' : 'ok', reason: '' };
+  };
   return [
-    { key: '1_short_margin', condition: '東証 売残 8,000億円未満', value: g('sell_margin_oku', null),
-      alert: Number(g('sell_margin_oku', 9e9)) < SK.MARGIN.SELL_THRESHOLD_OKU },
+    mk('1_short_margin', '東証 売残 8,000億円未満', g('sell_margin_oku', null),
+      Number(g('sell_margin_oku', 9e9)) < SK.MARGIN.SELL_THRESHOLD_OKU, missing('sell_margin_oku')),
     // 水準（>=1.0）ではなく前回公表比の方向で見る。理由は marginRatioTrend_ のコメント参照。
     // 値は「今回（前回→方向）」の形で出す。方向だけだと元の数字が追えず、
     // 数字だけだと何と比べて上昇なのかが分からないため、両方を1セルに入れる。
-    { key: '2_margin_ratio', condition: '信用倍率 前回公表比 上昇（買い方過多が進行）',
-      value: marginRatioLabel_(g('margin_ratio', null), g('margin_ratio_prev', null), g('margin_ratio_trend', 'FLAT')),
-      alert: g('margin_ratio_trend') === 'UP' },
-    { key: '3_ns_ratio', condition: 'NS倍率（日経/ S&P500）低下・米国株優位', value: g('ns_ratio_trend', null),
-      alert: g('ns_ratio_trend') === 'DOWN' },
-    { key: '4_nikkei_eps', condition: '日経平均EPS 下落（理論株価の低下）', value: g('nikkei_eps_trend', null),
-      alert: g('nikkei_eps_trend') === 'DOWN' },
-    { key: '5_foreign_sell', condition: '海外投資家の現物売り越し', value: g('foreign_net_oku', null),
-      alert: Number(g('foreign_net_oku', 0)) < 0 },
-    { key: '6_vix_macd', condition: 'VIX指数 MACD ゴールデンクロス', value: g('vix_macd_signal', null),
-      alert: g('vix_macd_signal') === 'GOLDEN_CROSS' },
-    { key: '7_earnings', condition: '好決算銘柄の決算後急落が頻発', value: g('earnings_selloff', null),
-      alert: g('earnings_selloff') === 'YES' || g('earnings_selloff') === true },
+    mk('2_margin_ratio', '信用倍率 前回公表比 上昇（買い方過多が進行）',
+      marginRatioLabel_(g('margin_ratio', null), g('margin_ratio_prev', null), g('margin_ratio_trend', 'FLAT')),
+      g('margin_ratio_trend') === 'UP', missing('margin_ratio')),
+    mk('3_ns_ratio', 'NS倍率（日経/ S&P500）低下・米国株優位', g('ns_ratio_trend', null),
+      g('ns_ratio_trend') === 'DOWN', missing('ns_ratio_trend')),
+    mk('4_nikkei_eps', '日経平均EPS 下落（理論株価の低下）', g('nikkei_eps_trend', null),
+      g('nikkei_eps_trend') === 'DOWN', missing('nikkei_eps_trend')),
+    mk('5_foreign_sell', '海外投資家の現物売り越し', g('foreign_net_oku', null),
+      Number(g('foreign_net_oku', 0)) < 0, missing('foreign_net_oku')),
+    // 'NONE' は vixMacdSignal_ が「35本未満などで判定できない」ときに返す値
+    mk('6_vix_macd', 'VIX指数 MACD ゴールデンクロス', g('vix_macd_signal', null),
+      g('vix_macd_signal') === 'GOLDEN_CROSS', missing('vix_macd_signal') || data.vix_macd_signal === 'NONE'),
+    mk('7_earnings', '好決算銘柄の決算後急落が頻発', g('earnings_selloff', null),
+      g('earnings_selloff') === 'YES' || g('earnings_selloff') === true, missing('earnings_selloff')),
   ];
+}
+
+// 7条件の集計。judged=判定できた件数（点灯+正常）、unknown=不明の件数。
+function summarizeConditions_(conds) {
+  const list = conds || [];
+  const lit = list.filter(c => c.status === 'lit').length;
+  const unknown = list.filter(c => c.status === 'unknown').length;
+  return { lit: lit, judged: list.length - unknown, unknown: unknown, total: list.length };
+}
+
+// 「点灯3 / 判定できた4（不明3）」。分母を7固定にしない（不明を正常扱いにしないため）。
+function conditionSummaryLabel_(sum) {
+  return '点灯' + sum.lit + ' / 判定できた' + sum.judged + '（不明' + sum.unknown + '）';
+}
+
+// 状態列の表示。理由があれば「不明（日付未記入）」の形で出す。
+function conditionStatusLabel_(c) {
+  if (c.status === 'lit') return '⚠ 点灯';
+  if (c.status === 'unknown') {
+    const parts = [];
+    if (c.reason) parts.push(c.reason);
+    if (c.staleLit) parts.push('古い値では点灯');   // 警告を隠さない。点灯数には数えない
+    return '不明' + (parts.length ? '（' + parts.join('・') + '）' : '');
+  }
+  return '正常';
+}
+
+// 入力欄C列（最終更新日）から鮮度を見る。null=新鮮。Date でなければ「取得失敗の理由」（文字列）か「日付未記入」。
+// readMacroInputSheet_ の age() と同じ判定（Date でない→古い扱い、STALE_DAYS 超→古い）で、理由の文字列だけ足している。
+function macroStaleReason_(cell, nowMs, staleDays) {
+  if (cell instanceof Date && !isNaN(cell.getTime())) {
+    const a = Math.floor((nowMs - cell.getTime()) / 86400000);
+    return a > staleDays ? a + '日前' : null;
+  }
+  const t = String(cell == null ? '' : cell).trim();
+  return t ? '取得失敗: ' + t : '日付未記入';
 }
 
 // ── I/O（GAS） ──────────────────────────────────────────────────────────────
 
 // 日経平均の予想EPS(加重平均)トレンドを stock-marketdata.com から取得。
 // 日経公式/証券系はボット遮断が多いが当サイトはHTML表で公開。数値・日付はASCIIなので
-// エンコーディングに依らず抽出可能。取得/解析に失敗したら null（→手入力にフォールバック）。
+// エンコーディングに依らず抽出可能。取得/解析に失敗したら { error: 理由 }（→手入力にフォールバック。
+// 理由は他の取得項目と同じく入力欄C列に書く。成功時は { eps, date, trend }）。
 function fetchNikkeiEps_() {
   try {
     var res = UrlFetchApp.fetch('https://stock-marketdata.com/kabukashihyo.html',
       { headers: { 'User-Agent': 'Mozilla/5.0' }, muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) { Logger.log('日経EPS取得失敗 HTTP ' + res.getResponseCode()); return null; }
-    return parseNikkeiEpsHtml_(res.getContentText());
-  } catch (e) { Logger.log('日経EPS取得エラー: ' + e.message); return null; }
+    if (res.getResponseCode() !== 200) {
+      Logger.log('日経EPS取得失敗 HTTP ' + res.getResponseCode());
+      return { error: '日経EPS取得失敗 HTTP ' + res.getResponseCode() };
+    }
+    return parseNikkeiEpsHtml_(res.getContentText()) || { error: '日経EPSを解析できず（サイト改修の疑い。ログ参照）' };
+  } catch (e) { Logger.log('日経EPS取得エラー: ' + e.message); return { error: '日経EPS取得エラー: ' + e.message }; }
 }
 
 // HTMLから日付ごとのEPS(加重平均)を拾い、直近トレンド(UP/FLAT/DOWN)を判定。
@@ -760,19 +814,28 @@ function readMacroInputSheet_() {
     }
     return null;
   };
+  // C列の生の値（Date か、失敗理由の文字列か、空）。行が無ければ undefined
+  const cellOf = (re) => {
+    for (var i = 0; i < rows.length; i++) { if (re.test(String(rows[i][0] || ''))) return rows[i][2]; }
+    return undefined;
+  };
   const items = {
-    sell_margin_oku:  { re: /売残.*億|売残高/,   label: '東証 売残' },
-    margin_ratio:     { re: /信用倍率/,          label: '信用倍率' },
-    nikkei_eps_trend: { re: /EPS/,               label: '日経平均EPSトレンド' },
-    foreign_net_oku:  { re: /海外/,              label: '海外投資家 現物ネット' },
-    earnings_selloff: { re: /決算|sell/i,        label: '好決算sell-on-news' },
+    sell_margin_oku:  { re: /売残.*億|売残高/,   label: '東証 売残',            cond: '1_short_margin' },
+    margin_ratio:     { re: /信用倍率/,          label: '信用倍率',             cond: '2_margin_ratio' },
+    nikkei_eps_trend: { re: /EPS/,               label: '日経平均EPSトレンド',  cond: '4_nikkei_eps' },
+    foreign_net_oku:  { re: /海外/,              label: '海外投資家 現物ネット', cond: '5_foreign_sell' },
+    earnings_selloff: { re: /決算|sell/i,        label: '好決算sell-on-news',   cond: '7_earnings' },
   };
   // 古い／日付未記入の項目名を集めて、判定結果と一緒に表示できるようにする
   const stale = [];
+  // 同じ項目を条件キー→理由で持つ。急落サイン表で「正常」でなく「不明」と出すため（表示専用）
+  const staleByCond = {};
   Object.keys(items).forEach((k) => {
     const a = age(items[k].re);
     if (a == null) stale.push(items[k].label + '(日付未記入)');
     else if (a > MACRO.STALE_DAYS) stale.push(items[k].label + '(' + a + '日前)');
+    const reason = macroStaleReason_(cellOf(items[k].re), Date.now(), MACRO.STALE_DAYS);
+    if (reason) staleByCond[items[k].cond] = reason;
   });
 
   return {
@@ -782,6 +845,7 @@ function readMacroInputSheet_() {
     foreign_net_oku:  find(items.foreign_net_oku.re),
     earnings_selloff: String(find(items.earnings_selloff.re) || 'NO').toUpperCase(),
     stale: stale,
+    stale_by_cond: staleByCond,
   };
 }
 
@@ -811,7 +875,8 @@ function updateMarketMacroRun_() {
   // （Stackdriverを見なくてもシート上で原因が分かるようにする。判定ロジック側は変更していない）。
   if (marginRatio != null) writes.push({ re: /信用倍率/, value: marginRatio });
   else if (r1570 && r1570.error) writes.push({ re: /信用倍率/, errorNote: r1570.error });
-  if (eps) writes.push({ re: /EPS/, value: eps.trend });
+  if (eps && eps.trend != null) writes.push({ re: /EPS/, value: eps.trend });
+  else if (eps && eps.error) writes.push({ re: /EPS/, errorNote: eps.error });
   if (flow && flow.netOku != null) writes.push({ re: /海外/, value: flow.netOku });
   else if (flow && flow.error) writes.push({ re: /海外/, errorNote: flow.error });
   if (earn && earn.alert != null) writes.push({ re: /決算|sell/i, value: earn.alert ? 'YES' : 'NO' });
@@ -820,7 +885,7 @@ function updateMarketMacroRun_() {
   const manual = readMacroInputSheet_();                       // 取込値を書き戻した後に読む
   if (tse) manual.sell_margin_oku = tse.sellOku;
   if (marginRatio != null) manual.margin_ratio = marginRatio;
-  if (eps) manual.nikkei_eps_trend = eps.trend;
+  if (eps && eps.trend != null) manual.nikkei_eps_trend = eps.trend;
   if (flow && flow.netOku != null) manual.foreign_net_oku = flow.netOku;
   if (earn && earn.alert != null) manual.earnings_selloff = earn.alert ? 'YES' : 'NO';
 
@@ -835,8 +900,10 @@ function updateMarketMacroRun_() {
   let ns = 'FLAT', vix = 'NONE';
   try {
     const n225 = fetchIndexCloses_('^N225'), spx = fetchIndexCloses_('^GSPC');
-    ns = nsRatioTrend_(n225, spx, MACRO.NS_WINDOW);
-  } catch (e) { Logger.log('NS倍率取得失敗: ' + e.message); }
+    // 終値が取れない（Yahoo 429 等で空配列）と nsRatioTrend_ は 'FLAT' を返し「正常」に見える。
+    // 比べる本数が足りないときは判定しない（null＝急落サイン表で「不明」）
+    ns = (n225.length > MACRO.NS_WINDOW && spx.length > MACRO.NS_WINDOW) ? nsRatioTrend_(n225, spx, MACRO.NS_WINDOW) : null;
+  } catch (e) { ns = null; Logger.log('NS倍率取得失敗: ' + e.message); }   // null＝急落サイン表では「不明」
   try { vix = vixMacdSignal_(fetchIndexCloses_('^VIX')); } catch (e) { Logger.log('VIX取得失敗: ' + e.message); }
 
   const data = Object.assign({}, manual, {
@@ -844,17 +911,18 @@ function updateMarketMacroRun_() {
     margin_ratio_prev: ratioPrev, margin_ratio_trend: ratioTrend,
   });
   const conds = checkMarketConditions_(data);
-  const lit = conds.filter(c => c.alert).length;
+  const sum = summarizeConditions_(conds);
+  const lit = sum.lit;
 
-  writeAlertSheet_(conds, lit, data);
+  writeAlertSheet_(conds, sum, data);
 
   const regime = marginRegime_(data.sell_margin_oku, ratioTrend);
   PropertiesService.getScriptProperties().setProperty(MACRO.REGIME_PROP, regime);
-  Logger.log('相場マクロ更新: 点灯 ' + lit + '/7 ・地合い=' + regime + ' ・NS=' + ns + ' ・VIX=' + vix +
+  Logger.log('相場マクロ更新: ' + conditionSummaryLabel_(sum) + ' ・地合い=' + regime + ' ・NS=' + ns + ' ・VIX=' + vix +
     ' ・東証売残=' + (tse ? tse.sellOku + '億' : '未取込') +
     ' ・信用倍率(1570)=' + (marginRatio != null ? marginRatio + '(' + r1570.date + ')' : (r1570 && r1570.error ? '取得失敗:' + r1570.error : '手入力')) +
     ' ・倍率トレンド=' + ratioTrend + '(前回' + (ratioPrev == null ? 'なし' : ratioPrev) + ')' +
-    ' ・日経EPS=' + (eps ? eps.eps + '(' + eps.date + ')→' + eps.trend : '手入力') +
+    ' ・日経EPS=' + ((eps && eps.trend != null) ? eps.eps + '(' + eps.date + ')→' + eps.trend : (eps && eps.error ? '取得失敗:' + eps.error : '手入力')) +
     ' ・海外投資家=' + ((flow && flow.netOku != null) ? flow.netOku + '億(' + flow.week + ')' : (flow && flow.error ? '取得失敗:' + flow.error : '手入力')) +
     ' ・好決算sell=' + ((earn && earn.alert != null) ? (earn.alert ? 'YES' : 'NO') + '(' + earn.drops + '/' + earn.total + ')' : (earn && earn.error ? '取得失敗:' + earn.error : '手入力')));
   // 入力の欠損・古さは、判定結果(N/7)だけ見ていると気づけない。必ず表に出す。
@@ -864,7 +932,7 @@ function updateMarketMacroRun_() {
       (tse ? '東証売残' + tse.sellOku + '億' : '⚠ mtseisan未取込') +
       '・倍率' + (marginRatio != null ? marginRatio + '(1570)' : '手入力') +
       '→' + macroValueLabel_(ratioTrend) + (ratioPrev == null ? '(前回なし)' : '(前回' + ratioPrev + ')') +
-      ' ・急落' + lit + '/7 ・地合い' + regime +
+      ' ・急落サイン' + conditionSummaryLabel_(sum) + ' ・地合い' + regime +
       (stale.length ? '\n⚠ 古い入力: ' + stale.join('、') : ''), '相場マクロ', stale.length ? 15 : 8);
   } catch (e) { Logger.log('トースト表示に失敗: ' + e.message); }
   if (stale.length) Logger.log('⚠ 更新が古い/日付未記入の項目: ' + stale.join('、'));
@@ -962,14 +1030,16 @@ function calendarMapFromEntries_(entries) {
  * styleSheet_/autoFit_ もシート全体（行1をヘッダ扱いする実装）を使うと入力欄の見た目を
  * 壊すため使わず、この関数の中で下段だけを直接装飾する。
  */
-function writeAlertSheet_(conds, lit, data) {
+function writeAlertSheet_(conds, sum, data) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(MACRO.INPUT_SHEET) || setupMacroSheets_().input;
   const regime = marginRegime_(data.sell_margin_oku, data.margin_ratio_trend);
-  // 点灯数だけでは強弱が読み取れないため、目安を併記する
-  const scale = lit >= 5 ? '（5件以上＝警戒領域）' : lit >= 3 ? '（3〜4件＝注意）' : '（2件以下＝落ち着いている）';
+  // 点灯数だけでは強弱が読み取れないため、目安を併記する。不明があるうちは「落ち着いている」と読めないよう、目安を出さない
+  const lit = sum.lit;
+  const scale = sum.unknown > 0 ? '（不明の条件があるため目安は参考）'
+    : lit >= 5 ? '（5件以上＝警戒領域）' : lit >= 3 ? '（3〜4件＝注意）' : '（2件以下＝落ち着いている）';
   const rows = [
-    ['急落サイン 点灯数', lit + ' / 7' + scale, ''],
+    ['急落サイン 点灯数', conditionSummaryLabel_(sum) + scale, ''],
     ['市場地合い', regime + (regime === 'SHORT_COVER' ? '（ショートカバー好機・買い追い風）'
       : regime === 'SUPPLY_RISK' ? '（需給悪化・売り警戒）' : '（中立）'), ''],
     ['この表を更新した時刻', Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm')
@@ -982,7 +1052,7 @@ function writeAlertSheet_(conds, lit, data) {
   rows.push(['', '', '']);
   const subHeaderIdx = rows.length;   // ['条件','状態','値'] を積む位置（0始まり）
   rows.push(['条件', '状態', '値']);
-  conds.forEach(c => rows.push([c.condition, c.alert ? '⚠ 点灯' : '正常', macroValueLabel_(c.value)]));
+  conds.forEach(c => rows.push([c.condition, conditionStatusLabel_(c), macroValueLabel_(c.value)]));
 
   const startRow = MACRO.ALERT_START_ROW;
   const width = 3;

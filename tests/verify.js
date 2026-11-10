@@ -74,6 +74,8 @@ const EXPORTS = [
   'ML',
   'benchmarkReturn_', 'extractMlRow_', 'buildDateCloseMap_', 'barDateKey_',
   'numbersNotInSource_', 'flagUnsourcedNumbers_', 'buildAiPrompt_',
+  'summarizeConditions_', 'conditionSummaryLabel_', 'conditionStatusLabel_', 'macroStaleReason_', 'fetchNikkeiEps_',
+  'readMacroInputSheet_', 'writeAlertSheet_', 'earningsByCodeFromRows_', 'calendarDateKey_', 'generateAiSummary', 'generateAiSummaryRun_',
   'paperTradeEvaluate_', 'paperTradePnl_', 'paperUnrealized_',
   'wilsonInterval_', 'decideWeight_', 'SIGNAL_WEIGHT_', 'SIGNAL_DIR_',
 ];
@@ -1341,6 +1343,148 @@ console.log('\n【33】買い推奨走査の時間予算（6分制限で強制�
   eq(M.paperUnrealized_(100, 105, 200), 1000, '含み益 = (終値−買値)×株数');
   eq(M.paperUnrealized_(100, 95, 200), -1000, '含み損はマイナス');
   eq([M.paperUnrealized_(0, 105, 200), M.paperUnrealized_(100, 0, 200), M.paperUnrealized_(100, 105, 0)], ['', '', ''], '買値・終値・株数が欠けたら空欄');
+}
+
+console.log('\n【34】急落サイン — 取得失敗・古い条件は「正常」でなく「不明」（表示のみ）');
+{
+  const fresh = {
+    sell_margin_oku: 9000, margin_ratio: 10.24, margin_ratio_prev: 11.0, margin_ratio_trend: 'DOWN',
+    ns_ratio_trend: 'UP', nikkei_eps_trend: 'UP',
+    foreign_net_oku: 500, vix_macd_signal: 'DEAD_CROSS', earnings_selloff: 'NO',
+  };
+  const base = M.checkMarketConditions_(fresh);
+  eq(base.map(c => c.status), ['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok'], '全部そろって新鮮なら全件「正常」（従来どおり）');
+  eq(M.summarizeConditions_(base), { lit: 0, judged: 7, unknown: 0, total: 7 }, '不明なしなら判定できた7');
+  // 日経EPS・海外投資家・好決算が古い（手入力の鮮度警告に該当）。値はEPS=DOWN, 海外=-300 と「点灯しそうな」古い値
+  const stale = M.checkMarketConditions_(Object.assign({}, fresh, {
+    nikkei_eps_trend: 'DOWN', foreign_net_oku: -300, earnings_selloff: 'YES',
+    stale_by_cond: { '4_nikkei_eps': '96日前', '5_foreign_sell': '取得失敗: JQUANTS_API_KEY未設定', '7_earnings': '日付未記入' },
+  }));
+  eq(stale.map(c => c.status), ['ok', 'ok', 'ok', 'unknown', 'unknown', 'ok', 'unknown'], '古い／失敗の3条件は「不明」');
+  eq(stale.filter(c => c.alert).length, 0, '古い値は点灯にも数えない');
+  const sum = M.summarizeConditions_(stale);
+  eq(sum, { lit: 0, judged: 4, unknown: 3, total: 7 }, '不明3件は分母（判定できた）から外れる');
+  eq(M.conditionSummaryLabel_(sum), '点灯0 / 判定できた4（不明3）', '表示は「点灯N / 判定できたM（不明K）」');
+  eq(M.conditionStatusLabel_(stale[3]), '不明（96日前・古い値では点灯）', '状態列に理由を添え、古い値のままなら点灯していた事実も残す');
+  eq(M.conditionStatusLabel_(stale[4]), '不明（取得失敗: JQUANTS_API_KEY未設定・古い値では点灯）', '失敗でも、古い値で点灯していたなら併記');
+  eq(M.conditionStatusLabel_(M.checkMarketConditions_(Object.assign({}, fresh, { stale_by_cond: { '4_nikkei_eps': '96日前' } }))[3]), '不明（96日前）', '古い値が正常側なら「古い値では点灯」は付けない');
+  eq(M.summarizeConditions_(stale).lit, 0, '古い値で点灯だったものも点灯数には数えない');
+  eq(M.conditionStatusLabel_(stale[0]), '正常', '正常の表示は従来どおり');
+  // 新鮮な点灯は点灯のまま数える
+  const mixed = M.checkMarketConditions_(Object.assign({}, fresh, {
+    sell_margin_oku: 5000, nikkei_eps_trend: 'DOWN', stale_by_cond: { '4_nikkei_eps': '96日前' } }));
+  eq(M.summarizeConditions_(mixed), { lit: 1, judged: 6, unknown: 1, total: 7 }, '点灯1・判定できた6・不明1');
+  eq(M.conditionStatusLabel_(mixed[0]), '⚠ 点灯', '点灯の表示は従来どおり');
+  // 欠測（値なし）も不明。VIX は判定できないとき 'NONE'
+  const empty = M.checkMarketConditions_({});
+  eq(M.summarizeConditions_(empty), { lit: 0, judged: 0, unknown: 7, total: 7 }, 'データが空なら全件不明（0/7の「落ち着いている」と読ませない）');
+  eq(M.checkMarketConditions_(Object.assign({}, fresh, { vix_macd_signal: 'NONE' }))[5].status, 'unknown', 'VIXが判定不能(NONE)なら不明');
+  eq(M.checkMarketConditions_(Object.assign({}, fresh, { ns_ratio_trend: null }))[2].status, 'unknown', 'NS倍率が取得失敗(null)なら不明');
+  ok_(/n225\.length > MACRO\.NS_WINDOW && spx\.length > MACRO\.NS_WINDOW\) \? nsRatioTrend_\(n225, spx, MACRO\.NS_WINDOW\) : null/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'MarketMacro.js'), 'utf8')), 'NS倍率の終値が足りない（取得失敗で空配列）ときは null＝不明にする配線がある（文面確認）');
+  eq(M.checkMarketConditions_(Object.assign({}, fresh, { foreign_net_oku: 0 }))[4].status, 'ok', '海外投資家0は値あり（不明にしない）');
+}
+{
+  // C列（最終更新日）→ 不明の理由
+  const now = Date.UTC(2026, 10, 10);
+  const d = (n) => new Date(now - n * 86400000);
+  eq(M.macroStaleReason_(d(3), now, 10), null, '3日前は新鮮');
+  eq(M.macroStaleReason_(d(10), now, 10), null, 'ちょうど閾値(10日)は新鮮（既存の age() と同じ > 判定）');
+  eq(M.macroStaleReason_(d(96), now, 10), '96日前', '96日前は古い');
+  eq(M.macroStaleReason_('', now, 10), '日付未記入', '空は日付未記入');
+  eq(M.macroStaleReason_('JQUANTS_API_KEY未設定', now, 10), '取得失敗: JQUANTS_API_KEY未設定', '失敗理由の文字列はそのまま理由にする');
+}
+{
+  // readMacroInputSheet_: 実物に近いシート（見出し+5項目）を渡して、古い項目が条件キーで返ることを見る
+  const now = Date.now();
+  const daysAgo = n => new Date(now - n * 86400000);
+  const sheetRows = [
+    ['項目', '値', '最終更新日'],
+    ['東証 売残高（億円）', 6439, daysAgo(1)],
+    ['信用倍率（日経レバ1570）', 19.17, daysAgo(1)],
+    ['日経平均EPSトレンド（自動取得:stock-marketdata・手入力も可）', 'UP', daysAgo(96)],
+    ['海外投資家 現物ネット（億円）', 0, 'JQUANTS_API_KEY未設定'],
+    ['好決算sell-on-news（YES/NO）', 'NO', ''],
+  ];
+  const stub = { getSheetByName: () => ({ getRange: () => ({ getValues: () => sheetRows.map(r => r.slice()) }) }) };
+  const saved = sandbox.SpreadsheetApp.getActive;
+  sandbox.SpreadsheetApp.getActive = () => stub;
+  let r;
+  try { r = M.readMacroInputSheet_(); } finally { sandbox.SpreadsheetApp.getActive = saved; }
+  eq(r.stale_by_cond, { '4_nikkei_eps': '96日前', '5_foreign_sell': '取得失敗: JQUANTS_API_KEY未設定', '7_earnings': '日付未記入' },
+    '入力欄の古い／失敗の項目が条件キーで返る（新鮮な売残・倍率は含まれない）');
+  eq(r.stale.length, 3, '従来の stale（古い入力の警告行）は同じ3件のまま');
+  const conds = M.checkMarketConditions_(Object.assign({}, r, { ns_ratio_trend: 'UP', vix_macd_signal: 'ABOVE', margin_ratio_prev: 17.6, margin_ratio_trend: 'UP' }));
+  eq(M.conditionSummaryLabel_(M.summarizeConditions_(conds)), '点灯2 / 判定できた4（不明3）', '実シート相当の入力で「点灯2 / 判定できた4（不明3）」（売残6439億<8000億と倍率UPが点灯）');
+}
+{
+  // 日経EPSの失敗は他項目と同じく理由を返す（C列に書く errorNote の元）。通信モックは常に例外
+  const r = M.fetchNikkeiEps_();
+  ok_(r && typeof r.error === 'string' && r.error.indexOf('日経EPS取得エラー') === 0, '日経EPS取得に失敗したら { error } を返す（null で黙らない）');
+  ok_(r.trend === undefined, '失敗時に trend を持たない（古い値を新しい値と取り違えない）');
+  const src = String(M.readMacroInputSheet_) + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'MarketMacro.js'), 'utf8');
+  ok_(/else if \(eps && eps\.error\) writes\.push\(\{ re: \/EPS\/, errorNote: eps\.error \}\)/.test(src), '日経EPSの失敗時も C列へ errorNote を書く配線がある（呼び出し側の文面確認）');
+}
+{
+  // 書き出し: 要約行と状態列
+  const written = {};
+  const rangeStub = (r, c, nr, nc) => {
+    const o = {
+      clearContent: () => o, clearFormat: () => o, setFontWeight: () => o, setBackground: () => o, setFontColor: () => o,
+      setHorizontalAlignment: () => o, setVerticalAlignment: () => o, setNumberFormat: () => o, setWrap: () => o,
+      setValues: (g) => { written[r] = g; return o; },
+      getDisplayValues: () => [], getValues: () => [],
+    };
+    return o;
+  };
+  const sh = { getMaxRows: () => 100, getMaxColumns: () => 5, getLastRow: () => 0, getRange: rangeStub, setColumnWidth: () => {} };
+  const saved = sandbox.SpreadsheetApp.getActive;
+  sandbox.SpreadsheetApp.getActive = () => ({ getSheetByName: () => sh });
+  const sandboxFmt = sandbox.Utilities.formatDate;
+  const conds = M.checkMarketConditions_({
+    sell_margin_oku: 9000, margin_ratio: 19.17, margin_ratio_prev: 17.6, margin_ratio_trend: 'UP',
+    ns_ratio_trend: 'UP', nikkei_eps_trend: 'DOWN', foreign_net_oku: 500, vix_macd_signal: 'DEAD_CROSS', earnings_selloff: 'NO',
+    stale_by_cond: { '4_nikkei_eps': '96日前' },
+  });
+  try { M.writeAlertSheet_(conds, M.summarizeConditions_(conds), { sell_margin_oku: 9000, margin_ratio_trend: 'UP', stale: ['日経平均EPSトレンド(96日前)'] }); }
+  finally { sandbox.SpreadsheetApp.getActive = saved; }
+  const grid = written[M.MACRO.ALERT_START_ROW];
+  ok_(grid && grid[0][1].indexOf('点灯1 / 判定できた6（不明1）') === 0, 'シートの要約行が「点灯1 / 判定できた6（不明1）」で始まる');
+  ok_(grid[0][1].indexOf('落ち着いている') < 0, '不明があるときは「落ち着いている」の目安を出さない');
+  const eps = grid.find(r => String(r[0]).indexOf('日経平均EPS') === 0);
+  eq(eps.slice(1), ['不明（96日前・古い値では点灯）', '下落'], 'EPS行は状態が「不明（96日前）」、値は参考として残す');
+  eq(grid.find(r => String(r[0]).indexOf('信用倍率') === 0)[1], '⚠ 点灯', '新鮮な点灯は従来どおり');
+}
+
+console.log('\n【35】決算カレンダー読み取り — 発表予定日が今日より前の行は除外（書き込み側は変えない）');
+{
+  const rows = [
+    ['7203', 'トヨタ', '2026-11-09', '確定'],   // 昨日＝除外
+    ['6758', 'ソニー', '2026-11-10', '確定'],    // 今日＝残す
+    ['9984', 'SB', '2026-11-12', '予測'],        // 先＝残す
+    ['8306', '三菱UFJ', new Date(Date.UTC(2026, 10, 9)), '確定'],   // Date型の昨日＝除外
+    ['8058', '三菱商事', new Date(Date.UTC(2026, 10, 11)), '確定'], // Date型の明日＝残す
+    ['', '', '2026-11-12', ''],                  // コード無しは無視
+  ];
+  const m = M.earningsByCodeFromRows_(rows, '2026-11-10');
+  eq(Object.keys(m).sort(), ['6758', '8058', '9984'], '昨日の行（文字列・Date とも）は除外、今日以降は残る');
+  eq(m['6758'], '2026-11-10（確定）', '残った行の書式は従来どおり「日付（確度）」');
+  eq(M.calendarDateKey_('2026/1/5'), '2026-01-05', 'スラッシュ・1桁月日もそろえる');
+  eq(M.calendarDateKey_(''), '', '日付が読めなければ空');
+  eq(M.earningsByCodeFromRows_([['1301', '極洋', '日付不明', '予測']], '2026-11-10'), { '1301': '日付不明（予測）' }, '日付が読めない行は従来どおり残す（除外の対象は「今日より前と分かる行」だけ）');
+  // 同じコードに過去行と将来行がある場合、過去行は使われない
+  const dup = M.earningsByCodeFromRows_([['7203', 'トヨタ', '2026-08-01', '確定'], ['7203', 'トヨタ', '2026-11-20', '予測']], '2026-11-10');
+  eq(dup, { '7203': '2026-11-20（予測）' }, '過去行が将来行を上書きしない／将来行が残る');
+  eq(M.earningsByCodeFromRows_(null, '2026-11-10'), {}, 'null でも落ちない');
+}
+
+console.log('\n【36】generateAiSummary — 実行記録に跡を残す（手動メニューのまま・自動トリガーには繋がない）');
+{
+  const src = String(M.generateAiSummary);
+  ok_(/runLogged_\('AI推奨コメント',\s*\(\)\s*=>\s*generateAiSummaryRun_\(\)\)/.test(src), 'generateAiSummary は runLogged_ で本体 generateAiSummaryRun_ を包む');
+  eq(typeof M.generateAiSummaryRun_, 'function', '本体 generateAiSummaryRun_ がある');
+  const all = ['Code.js', 'AiRecommend.js', 'WebMenu.js', 'MarketMacro.js', 'PaperTrade.js', 'Bloomberg.js'].map(f => read(f)).join('\n');
+  eq(/newTrigger\(\s*['"]generateAiSummary/.test(all), false, 'generateAiSummary のトリガーは作られていない（自動実行に繋げない）');
+  ok_(/addItem\([^)]*'generateAiSummary'\)/.test(read('Code.js')), 'メニュー項目（手動）は generateAiSummary のまま');
 }
 
 console.log('\n' + '─'.repeat(62));
