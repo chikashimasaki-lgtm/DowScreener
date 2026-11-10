@@ -74,6 +74,7 @@ const EXPORTS = [
   'ML',
   'benchmarkReturn_', 'extractMlRow_', 'buildDateCloseMap_', 'barDateKey_',
   'numbersNotInSource_', 'flagUnsourcedNumbers_', 'buildAiPrompt_',
+  'classifyMacroConditions_', 'macroAlertCountLabel_', 'fetchNikkeiEps_', 'calendarEarningsForAi_', 'calendarDateYmd_',
   'paperTradeEvaluate_', 'paperTradePnl_', 'paperUnrealized_',
   'wilsonInterval_', 'decideWeight_', 'SIGNAL_WEIGHT_', 'SIGNAL_DIR_',
 ];
@@ -1341,6 +1342,93 @@ console.log('\n【33】買い推奨走査の時間予算（6分制限で強制�
   eq(M.paperUnrealized_(100, 105, 200), 1000, '含み益 = (終値−買値)×株数');
   eq(M.paperUnrealized_(100, 95, 200), -1000, '含み損はマイナス');
   eq([M.paperUnrealized_(0, 105, 200), M.paperUnrealized_(100, 0, 200), M.paperUnrealized_(100, 105, 0)], ['', '', ''], '買値・終値・株数が欠けたら空欄');
+}
+
+console.log('\n【34】急落サインの「不明」— 取得失敗・古い条件を正常と数えない（表示のみ）');
+{
+  const conds = M.checkMarketConditions_({
+    sell_margin_oku: 5000, margin_ratio: 19.17, margin_ratio_prev: 17.6, margin_ratio_trend: 'UP',
+    ns_ratio_trend: 'DOWN', nikkei_eps_trend: 'UP', foreign_net_oku: 0, vix_macd_signal: 'NONE', earnings_selloff: 'NO',
+  });
+  const before = JSON.stringify(conds);
+  const sm = M.classifyMacroConditions_(conds, ['4_nikkei_eps', '5_foreign_sell', '7_earnings']);
+  eq([sm.lit, sm.judged, sm.unknown], [3, 4, 3], '不明3件は分母から外れる（点灯3 / 判定できた4）');
+  eq(M.macroAlertCountLabel_(sm), '点灯3 / 判定できた4（不明3）', '点灯数の表示形式');
+  eq(sm.rows.map(r => r.status), ['⚠ 点灯', '⚠ 点灯', '⚠ 点灯', '不明', '不明', '正常', '不明'], '不明の条件は「正常」と出さない');
+  eq(JSON.stringify(conds), before, '判定結果（alert）そのものは書き換えない');
+  eq(sm.rows.map(r => r.alert), conds.map(c => c.alert), '集計後も各条件の alert は判定のまま');
+  const stale = M.classifyMacroConditions_(conds, ['1_short_margin']);
+  eq([stale.lit, stale.judged, stale.unknown, stale.rows[0].status], [2, 6, 1, '不明（古い値では点灯）'],
+    '古い値で点灯していても点灯数には数えず、表示で隠さない');
+  const none = M.classifyMacroConditions_(conds, []);
+  eq(M.macroAlertCountLabel_(none), '点灯3 / 判定できた7（不明0）', '不明が無ければ従来の点灯数と同じ');
+  eq(M.classifyMacroConditions_(conds, undefined).unknown, 0, 'unknownKeys 省略でも落ちない');
+}
+{
+  // 日経EPSの取得失敗は { error } を返す（C列に理由を書くため）。テスト環境の UrlFetchApp は例外を投げる
+  const r = M.fetchNikkeiEps_();
+  eq([r.trend, typeof r.error], [undefined, 'string'], '日経EPSの取得失敗は理由（error）を返す');
+  const mm = read('MarketMacro.js');
+  ok_(mm.indexOf("else if (eps && eps.error) writes.push({ re: /EPS/, errorNote: eps.error });") >= 0,
+    '日経EPSの失敗も他項目と同様に C列へ errorNote を書く');
+  // 地合い（買い推奨に効く唯一のマクロ入力）は表示用の集計を経由しない
+  ok_(mm.indexOf('const regime = marginRegime_(data.sell_margin_oku, ratioTrend);') >= 0, '地合いの計算は従来どおり data から');
+  ['Code.js', 'DowFib.js', 'PaperTrade.js', 'WebMenu.js'].forEach(f => {
+    const src = read(f);
+    ok_(src.indexOf('classifyMacroConditions_') < 0 && src.indexOf('unknownKeys') < 0,
+      f + ' は不明の集計を参照しない（買い推奨の判定に影響しない）');
+  });
+}
+{
+  // readMacroInputSheet_: 古い・日付未記入（失敗理由の文字列を含む）の項目を unknownKeys に入れる
+  const now = Date.now(), day = 86400000;
+  const grid = [
+    ['項目', '値', '最終更新日'],
+    ['東証 売残（億円）', 6439, new Date(now - 1 * day)],
+    ['信用倍率', 19.17, new Date(now - 2 * day)],
+    ['日経平均EPSトレンド', 'UP', '日経EPSの表を解析できず'],
+    ['海外投資家 現物ネット（億円）', 0, new Date(now - 30 * day)],
+    ['好決算sell-on-news', 'NO', ''],
+  ];
+  const SA = { getActive: () => ({ getSheetByName: () => ({ getRange: () => ({ getValues: () => grid }) }) }) };
+  const code = read('MarketMacro.js') + '\n;({ readMacroInputSheet_ })';
+  const MM = new Function('SpreadsheetApp', 'Logger', 'Utilities', 'PropertiesService', 'UrlFetchApp', 'SK',
+    'return eval(' + JSON.stringify(code) + ')')(SA, sandbox.Logger, sandbox.Utilities, sandbox.PropertiesService, sandbox.UrlFetchApp, M.SK);
+  const r = MM.readMacroInputSheet_();
+  eq(r.unknownKeys, ['4_nikkei_eps', '5_foreign_sell', '7_earnings'], '失敗理由・古い・日付なしの項目が不明になる');
+  eq(r.nikkei_eps_trend, 'UP', '入力値の読み取り（判定に渡す値）は従来どおり');
+}
+
+console.log('\n【35】AI推奨コメントの決算カレンダー — 今日より前の発表予定は読まない');
+{
+  const vals = [
+    ['1111', 'A', '2026-11-09', '確定'],
+    ['2222', 'B', '2026-11-10', '予測'],
+    ['3333', 'C', '2026-11-20', '確定'],
+    ['4444', 'D', new Date('2026-11-09T00:00:00Z'), '確定'],
+    ['5555', 'E', new Date('2026-11-11T00:00:00Z'), '確定'],
+    ['⚠取得失敗', '', '', ''],
+    ['', '', '2026-11-30', '確定'],
+  ];
+  const m = M.calendarEarningsForAi_(vals, '2026-11-10');
+  eq(Object.keys(m).sort(), ['2222', '3333', '5555', '⚠取得失敗'], '昨日（11/09）の行は文字列・日付型とも除外し、今日以降は残す');
+  eq(m['2222'], '2026-11-10（予測）', '表示文字列は従来どおり「日付（確度）」');
+  eq([M.calendarDateYmd_('2026/1/5'), M.calendarDateYmd_(''), M.calendarDateYmd_(null)], ['2026-01-05', '', ''], '日付の正規化');
+  const ai = read('AiRecommend.js');
+  ok_(ai.indexOf("ctx.earningsByCode = calendarEarningsForAi_(vals, today);") >= 0, 'readMacroContextForAi_ が絞り込みを通す');
+  ok_(read('MarketMacro.js').indexOf("const header = ['コード', '銘柄名', '発表予定日', '確度', '時価総額（億円）'];") >= 0,
+    '決算カレンダーの書き込み側（列の並び）は変えていない');
+}
+
+console.log('\n【36】AI推奨コメント（手動メニュー）を実行記録に残す');
+{
+  const ai = read('AiRecommend.js');
+  ok_(/function generateAiSummary\(\) \{ return runLogged_\('AI推奨コメント', \(\) => generateAiSummaryRun_\(\)\); \}/.test(ai),
+    'generateAiSummary は runLogged_ で包まれている');
+  ok_(/function generateAiSummaryRun_\(\)/.test(ai), '本体は generateAiSummaryRun_');
+  const all = ['Code.js', 'MarketMacro.js', 'AiRecommend.js', 'WebMenu.js', 'PaperTrade.js', 'Bloomberg.js', 'DowFib.js'].map(read).join('\n');
+  ok_(!/newTrigger\(\s*['"]generateAiSummary/.test(all), '自動トリガーには繋いでいない');
+  ok_(read('Code.js').indexOf("'generateAiSummary')") >= 0, 'メニューの呼び先は generateAiSummary のまま');
 }
 
 console.log('\n' + '─'.repeat(62));

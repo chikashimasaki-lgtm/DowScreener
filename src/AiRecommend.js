@@ -31,7 +31,9 @@ const AI_TOP_N_ = 3;
 // メニューから呼ぶ入口。「売買プラン」シートを読み、Geminiでコメントを生成してメモ欄へ書く。
 // メニューの入口なので末尾「_」を付けない（「_」は内部ヘルパの目印として使い分ける）。
 // エディタの実行ドロップダウンにも出るので、手で動かして切り分けたいときに楽。
-function generateAiSummary() {
+// 実行記録（共通モジュール RunLog.js）で包み、押した事実・失敗を残す。自動トリガーには繋げない。
+function generateAiSummary() { return runLogged_('AI推奨コメント', () => generateAiSummaryRun_()); }
+function generateAiSummaryRun_() {
   const ss = SpreadsheetApp.getActive();
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY がスクリプトプロパティに未設定です');
@@ -131,10 +133,34 @@ function readMacroContextForAi_(ss) {
     const sh = ss.getSheetByName(MACRO.CALENDAR_SHEET);
     if (sh && sh.getLastRow() >= 2) {
       const vals = sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues();
-      vals.forEach(r => { if (r[0]) ctx.earningsByCode[String(r[0])] = r[2] + '（' + r[3] + '）'; });
+      const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+      ctx.earningsByCode = calendarEarningsForAi_(vals, today);
     }
   } catch (e) { Logger.log('AI要約: 決算カレンダーの読み取りに失敗 ' + e.message); }
   return ctx;
+}
+
+// 決算カレンダーの行（[コード, 銘柄名, 発表予定日, 確度]）をコード→「日付（確度）」にする（純関数）。
+// 発表予定日が今日（todayYmd, 'yyyy-MM-dd'）より前の行は除く。カレンダーの更新（17時）前に
+// AI推奨コメントを実行すると、前日までの発表予定が「決算が近い」として混ざるため。
+// 日付が読めない行は従来どおり残す（読み取り側だけの絞り込み。シートへの書き込みは変えない）。
+function calendarEarningsForAi_(vals, todayYmd) {
+  const out = {};
+  (vals || []).forEach(r => {
+    if (!r[0]) return;
+    const ymd = calendarDateYmd_(r[2]);
+    if (ymd && todayYmd && ymd < todayYmd) return;
+    out[String(r[0])] = r[2] + '（' + r[3] + '）';
+  });
+  return out;
+}
+
+// 発表予定日のセル値を 'yyyy-MM-dd' にそろえる。シートが日付型に変換した値（Date）と文字列の両方を受ける。
+function calendarDateYmd_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, 'Asia/Tokyo', 'yyyy-MM-dd');
+  const m = String(v == null ? '' : v).trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (!m) return '';
+  return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
 }
 
 // Geminiに渡す日本語プロンプトを組み立てる。JSON（コード→コメント）で返させる。
