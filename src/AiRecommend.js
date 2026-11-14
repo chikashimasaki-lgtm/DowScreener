@@ -59,7 +59,7 @@ function generateAiSummaryRun_() {
     if (parsed) {
       // 入力に無い数値は文末に「要確認」を付ける（AIコメントだけ。テンプレート文は入力の数値そのもの）
       const source = prompt.split('【出力形式】')[0];
-      aiRows.forEach(r => { if (parsed[r.code] != null && parsed[r.code] !== '') comments[r.code] = flagUnsourcedNumbers_(String(parsed[r.code]), source); });
+      aiRows.forEach(r => { if (parsed[r.code] != null && parsed[r.code] !== '') comments[r.code] = flagTradeOpinion_(flagUnsourcedNumbers_(String(parsed[r.code]), source)); });
     } else {
       aiMsg = text ? '（AIの応答を解析できずテンプレート文のみ）' : '（AI生成に失敗しテンプレート文のみ）';
     }
@@ -175,6 +175,14 @@ function buildAiPrompt_(planRows, ctx, todayLabel) {
   lines.push('各銘柄には「既存メモ」として、注文種別やトレンド判定など機械的に算出された事実が');
   lines.push('付いています。これらの事実は削らず活かしつつ、地合い・急落サイン・決算近接などの');
   lines.push('文脈を添えて、1〜2文の簡潔な日本語コメントに書き換えてください。');
+  lines.push('');
+  // 採点表（何をどの順で見るか）を先に渡す。自由に答えさせると実行のたびに着眼点がぶれるため（2026-11-15）
+  lines.push('【評価の手順（この順番で、毎回同じ基準で見てください）】');
+  lines.push('1. 既存メモの事実（注文種別・トレンド判定・見送り条件）をそのまま残す。');
+  lines.push('2. 市場全体の地合い（急落サイン・市場地合い）が、この銘柄の注意点になるかを見る。データなしなら触れない。');
+  lines.push('3. 決算の近接（「決算:」の日付）があれば、発表前後の値動きへの注意として添える。無ければ触れない。');
+  lines.push('4. 上の1〜3に無い観点（業績の見通し・目標株価・ニュース等）は書かない。');
+  lines.push('- 売買の見解は書かないでください（「買うべき」「売るべき」「おすすめ」「買い時」「必ず上がる」等）。買うか・いくら投じるか・どこで損切りするかは利用者が決めます。');
   lines.push('');
   lines.push('本日の日付（JST）: ' + today);
   lines.push('- 数値は、こちらが与えたデータの値だけを使い、自分で計算・推測した数値を書かないでください。');
@@ -304,3 +312,33 @@ function flagUnsourcedNumbers_(text, source) {
   const nums = numbersNotInSource_(s, source);
   return nums.length ? s + '（要確認: 入力に無い数値 ' + nums.slice(0, 5).join(', ') + '）' : s;
 }
+
+
+// ---- 売買の見解の検出（純関数・GAS API非依存） ----
+// AIに任せるのは事実の整理まで。買う・売るの見解が混じったら目印を付ける（出力は捨てない）。
+// 区分名の「買い推奨」、既存メモの「翌朝の寄付で買い」「手仕舞いも検討」は機械的な事実なので拾わない。
+const TRADE_OPINION_RE_ = /(?:買う|売る|購入する|売却する|買い増す)べき|おすすめ|お勧め|オススメ|推奨します|推奨できます|買い時|売り時|買い場|絶好の|(?:必ず|確実に|間違いなく)(?:上が|下が|上昇|下落|儲|利益)/g;
+function tradeOpinionPhrases_(text) {
+  const out = [], seen = {};
+  (String(text == null ? '' : text).match(TRADE_OPINION_RE_) || []).forEach(t => { if (!seen[t]) { seen[t] = true; out.push(t); } });
+  return out;
+}
+
+function flagTradeOpinion_(text) {
+  const s = String(text == null ? '' : text);
+  const hits = tradeOpinionPhrases_(s);
+  return hits.length ? s + '（要確認: 売買の見解 ' + hits.slice(0, 3).join(', ') + '）' : s;
+}
+
+// 診断（読み取り専用・Geminiは呼ばない）: 本番のプロンプトに採点表が入っているか、売買見解の検査が効くかを返す。
+// 実行: clasp --user runner run claspAiPromptCheck
+function claspAiPromptCheck() {
+  const p = buildAiPrompt_([{ code: '7203', name: 'トヨタ', kind: '買い推奨A', signal: '押し38%', note: '翌朝の寄付で買い' }],
+    { alertLine: '', regimeLine: '', earningsByCode: {} }, '2026/11/15');
+  return {
+    rubric: p.split('\n').filter(l => /^【評価の手順|^[1-4]\. |^- 売買の見解/.test(l)),
+    flagged: flagTradeOpinion_('地合いは軟調だが今が買い時'),
+    untouched: flagTradeOpinion_('翌朝の寄付で買い。決算前後の値動きに注意'),
+  };
+}
+
