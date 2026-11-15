@@ -1112,11 +1112,19 @@ function updateEarningsCalendarRun_() {
   } catch (e) { /* 営業日判定が使えない環境でも更新自体は続行する */ }
 
   const key = PropertiesService.getScriptProperties().getProperty('EDINETDB_API_KEY');
-  if (!key) { Logger.log('決算カレンダー: EDINETDB_API_KEY 未設定のためスキップ'); return; }
+  if (!key) {
+    Logger.log('決算カレンダー: EDINETDB_API_KEY 未設定のためスキップ');
+    if (isUserTriggered_()) { try { SpreadsheetApp.getActive().toast('決算カレンダーを更新できません。スクリプトプロパティに EDINETDB_API_KEY を設定してください', APP_NAME_, 8); } catch (e) {} }
+    return;
+  }
 
   const ss = SpreadsheetApp.getActive();
   const uni = ss.getSheetByName(SK.SHEETS.UNIVERSE);
-  if (!uni || uni.getLastRow() < 2) { Logger.log('決算カレンダー: 「銘柄」シートが空のためスキップ'); return; }
+  if (!uni || uni.getLastRow() < 2) {
+    Logger.log('決算カレンダー: 「銘柄」シートが空のためスキップ');
+    if (isUserTriggered_()) { try { ss.toast('「銘柄」シートが空です。先に銘柄コードを入れる（またはプライム銘柄を取得する）と更新できます', APP_NAME_, 8); } catch (e) {} }
+    return;
+  }
   const universe = uni.getRange(2, 1, uni.getLastRow() - 1, 2).getValues()
     .filter(r => r[0]).map(r => [to4_(String(r[0]).trim()), r[1] || '']);
   const codes = universe.map(r => r[0]);
@@ -1126,7 +1134,7 @@ function updateEarningsCalendarRun_() {
   const rows = fetchEarningsCalendarRows_();
   if (rows === null) {
     writeEarningsCalendarSheet_([], nameMap, '⚠ edinetdb.jp からの取得に失敗しました（詳細はログを参照）');
-    try { ss.toast('決算カレンダー: 取得失敗（ログ参照）', '酒田五法', 8); } catch (e) {}
+    try { ss.toast('決算カレンダー: 取得失敗（ログ参照）', APP_NAME_, 8); } catch (e) {}
     return;
   }
   // 0件ヒット時は「API自体が0件」なのか「フィールド名の想定違いで絞り込みが空振り」なのか
@@ -1136,7 +1144,7 @@ function updateEarningsCalendarRun_() {
   const entries = filterCalendarToUniverse_(rows, codes);
   writeEarningsCalendarSheet_(entries, nameMap, null);
   Logger.log('決算カレンダー更新: 対象' + codes.length + '銘柄中 ' + entries.length + '件ヒット');
-  try { ss.toast('決算カレンダー: ' + entries.length + '件（対象' + codes.length + '銘柄）', '酒田五法', 6); } catch (e) {}
+  try { ss.toast('決算カレンダー: ' + entries.length + '件（対象' + codes.length + '銘柄）', APP_NAME_, 6); } catch (e) {}
 }
 
 /**

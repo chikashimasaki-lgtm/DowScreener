@@ -99,30 +99,33 @@ function onOpen() {
   // 既存のスプレッドシートを開いたときに追従させるためのもの。既に末尾なら何もしない。
   try { UsageSheet.moveToLast(SpreadsheetApp.getActiveSpreadsheet()); } catch (e) {}
 
-  const ui = SpreadsheetApp.getUi();
+  MobileMenu.addToUi(SpreadsheetApp.getUi(), APP_NAME_, menuItems_());
+}
 
-  // 日常的に押すのは上の2つだけ。残りは「たまに個別に更新したいもの」と
-  // 「初回設定・後片付け」なので、サブメニューへ畳んで最初の画面を短く保つ。
-  // 平日18時の走査トリガーが回っている限り、上の2つも押す必要はない。
-  ui.createMenu(APP_NAME_)
-    .addItem('走査/続行（買い推奨と売買プランを更新）', 'scanSignals')
-    .addItem('売買プランだけ作り直す（買い推奨＋保有株）', 'buildPlans')
-    .addSeparator()
-    .addSubMenu(ui.createMenu('個別に更新')
-      .addItem('相場マクロ/急落サインを更新',   'updateMarketMacro')
-      .addItem('決算カレンダーを更新',          'updateEarningsCalendar')
-      .addItem('仮想売買を更新（買い推奨を買ったと仮定した結果）', 'updatePaperTrades')
-      .addItem('AI推奨コメントを生成（参考・投資助言ではありません）', 'generateAiSummary'))
-    .addSubMenu(ui.createMenu('設定とメンテナンス')
-      .addItem('セットアップ',                  'setup')
-      .addItem('プライム銘柄を取得（J-Quants）', 'fetchPrimeUniverse')
-      .addItem('自動実行を設定（プラン点検:7時半/相場マクロ:17時/走査:平日18時）', 'installDailyScanTrigger')
-      .addSeparator()
-      .addItem('使い方シートを作成/更新', 'createUsageSheet')
-      .addItem('シート順序を整える',      'ensureSheetOrder')
-      .addItem('走査の進捗リセット',      'resetScanQueue')
-      .addItem('廃止シートを削除（一度だけ）', 'removeDeprecatedSheets'))
-    .addToUi();
+// メニューの定義はここ1か所。PCのメニュー（onOpen）とスマホ用ページ（WebMenu.js）の両方がこれを使う。
+// 日常的に押すのは上の2つだけ。残りは「たまに個別に更新したいもの」と「初回設定・後片付け」なので
+// サブメニューへ畳む。平日18時の走査トリガーが回っている限り、上の2つも押す必要はない。
+// slow: 6分を超えうるので、スマホからはトリガーへ渡して実行する。
+// confirm: スマホのページで出す確認文（Webからは getUi の確認ダイアログが出せないため、必ず書く）。
+function menuItems_() {
+  const M = '個別に更新', S = '設定とメンテナンス';
+  return [
+    { label: '走査/続行（買い推奨と売買プランを更新）', fn: 'scanSignals', slow: true },
+    { label: '売買プランだけ作り直す（買い推奨＋保有株）', fn: 'buildPlans', slow: true },
+    { group: M, label: '相場マクロ/急落サインを更新', fn: 'updateMarketMacro' },
+    { group: M, label: '決算カレンダーを更新', fn: 'updateEarningsCalendar' },
+    { group: M, label: '仮想売買を更新（買い推奨を買ったと仮定した結果）', fn: 'updatePaperTrades' },
+    { group: M, label: 'AI推奨コメントを生成（参考・投資助言ではありません）', fn: 'generateAiSummary' },
+    { group: S, label: 'セットアップ', fn: 'setup' },
+    { group: S, label: 'プライム銘柄を取得（J-Quants）', fn: 'fetchPrimeUniverse' },
+    { group: S, label: '自動実行を設定（点検7:30・マクロ17時・走査18時）', fn: 'installDailyScanTrigger' },
+    { group: S, label: '使い方シートを作成/更新', fn: 'createUsageSheet' },
+    { group: S, label: 'シート順序を整える', fn: 'ensureSheetOrder' },
+    { group: S, label: '走査の進捗リセット', fn: 'resetScanQueue',
+      confirm: '走査の途中経過を消し、自動再開の予約も取り消します。次回は最初の銘柄からやり直しになります。よろしいですか？' },
+    { group: S, label: '廃止シートを削除（一度だけ）', fn: 'removeDeprecatedSheets',
+      confirm: '廃止済みのシート（ML学習データ・ML重み(参考)・AI推奨（参考））を削除します。元に戻せません。よろしいですか？' },
+  ];
 }
 
 // 破壊的操作の確認 confirmDestructive_() の本体は共通モジュール ConfirmUi.js
@@ -455,6 +458,10 @@ function writeScanStatus_(sig, done, total, failed) {
 
 function resetScanQueue() {
   const props = PropertiesService.getScriptProperties();
+  // 進捗を消すと次回は最初の銘柄から走査し直す。途中まで進んでいたときだけ確認する（何も無ければ消えるものが無い）
+  const cur = Number(props.getProperty('SK_CURSOR')) || 0;
+  if (cur > 0 && !confirmDestructive_('走査の進捗リセット',
+      '走査の途中経過（' + cur + '銘柄まで済み）を消し、自動再開の予約も取り消します。\n次回の走査は最初の銘柄からやり直しになります。続行しますか？')) return;
   props.deleteProperty('SK_CURSOR');
   props.deleteProperty('SK_FAILED');
   props.deleteProperty('SK_QUEUE');   // 旧方式の残骸があれば併せて掃除
@@ -470,15 +477,26 @@ function clearResumeTriggers_() {
 // 削除・設計変更した機能（trainMlWeights・別シート方式のAI推奨コメント等）がもう存在しないため、
 // 稼働中のスプレッドシートにタブとしてだけ残ってしまったものを消す。存在しなければ何もしない安全設計。
 // メニューの入口なので末尾「_」を付けない（「_」は内部ヘルパの目印として使い分ける）。
+const DEPRECATED_SHEETS_ = ['ML学習データ', 'ML重み(参考)', 'AI推奨（参考）'];
+
+// いま存在する廃止シートの名前だけを返す（純関数）。existing はシート名の配列。
+function deprecatedSheetsPresent_(existing) {
+  const have = new Set(existing || []);
+  return DEPRECATED_SHEETS_.filter(n => have.has(n));
+}
+
 function removeDeprecatedSheets() {
   const ss = SpreadsheetApp.getActive();
-  const names = ['ML学習データ', 'ML重み(参考)', 'AI推奨（参考）'];
+  const found = deprecatedSheetsPresent_(ss.getSheets().map(s => s.getName()));
+  if (!found.length) { ss.toast('削除するシートはありません', APP_NAME_, 5); return; }
+  if (!confirmDestructive_('廃止シートを削除',
+      '次の ' + found.length + '件のシートを削除します（元に戻せません）。\n・' + found.join('\n・') + '\n続行しますか？')) return;
   const removed = [];
-  names.forEach(name => {
+  found.forEach(name => {
     const sh = ss.getSheetByName(name);
     if (sh) { ss.deleteSheet(sh); removed.push(name); }
   });
-  const msg = removed.length ? removed.join('・') + ' を削除しました' : '対象のシートはありませんでした';
+  const msg = removed.join('・') + ' を削除しました';
   Logger.log('廃止シート削除: ' + msg);
   ss.toast(msg, APP_NAME_, 6);
 }
@@ -594,6 +612,8 @@ function sendPlanMail_(subject, lines) {
     labelAndArchiveSentMail_(subject);
   } catch (e) {
     Logger.log('メール送信に失敗（' + subject + '）: ' + e.message);
+    // 買い推奨のメールが届かないと気づけない。メニューから走査した人にだけ見える（トリガー実行では何も出ない）
+    try { SpreadsheetApp.getActive().toast('通知メールを送れませんでした（' + subject + '）。売買プランのシートは更新済みです。実行ログを確認してください', APP_NAME_, 10); } catch (_) {}
   }
 }
 
@@ -2112,17 +2132,19 @@ function planSummary_(targets) {
 function buildPlansFromSignals_(sig) {
   const cands = readCandidates_(sig);
   let held = { codes: new Set(), positions: {}, reason: null };
+  const notes = [];   // 利用者に見せたい注意（メニュー「売買プランだけ作り直す」の完了トーストに添える）
   try {
     held = getSbiHeldCodes_();
-    if (held.reason) Logger.log('保有株を売買プランに載せられません: ' + held.reason);
+    if (held.reason) { Logger.log('保有株を売買プランに載せられません: ' + held.reason); notes.push('保有株は載せられませんでした（実行ログ参照）'); }
   } catch (e) {
     // 参照元の権限切れ等。買い推奨だけでもプランは出したいので止めない。
     Logger.log('保有銘柄の取得に失敗（買い推奨のみで継続）: ' + e.message);
+    notes.push('保有銘柄を読めず買い推奨のみです（Asset_Status の共有・権限を確認）');
   }
   rememberSpreadsheetId_();   // スマホ用Webメニュー（WebMenu.js）が開けなかったときの予備
   const targets = planTargets_(cands, held);
   attachPlanExtras_(targets);
-  return { targets: targets, plans: writePlanSheet_(targets) };
+  return { targets: targets, plans: writePlanSheet_(targets), notes: notes };
 }
 
 // 売買プランの現在値（D列）が正の数値でない行があるか。純関数。rows は [[区分, コード, 銘柄名, 現在値, …], …]。
@@ -2154,9 +2176,10 @@ function buildPlans() {
   const r = buildPlansFromSignals_(sig);
   const ok = Object.keys(r.plans).filter(k => r.plans[k].ok).length;
   const picks = r.targets.filter(t => t.pick).length;
-  try { recordPaperTrades_(r.targets, r.plans); } catch (e) { Logger.log('仮想売買の記録に失敗（売買プランは正常）: ' + e.message); }
-  try { writeBriefingPicks_(r.targets, r.plans); } catch (e) { Logger.log('MarketBriefingへの書き込みに失敗（売買プランは正常）: ' + e.message); }   // 価格を直したときに「日本株_買い推奨」も合わせる
-  try { ss.toast('売買プランを更新しました（買い推奨 ' + picks + '件 / 算出できた銘柄 ' + ok + '件 / 対象 ' + r.targets.length + '件）', APP_NAME_, 6); } catch (e) { /* UIが無い実行（スマホ用Webメニューのトリガー）では出さない */ }
+  const notes = (r.notes || []).slice();
+  try { recordPaperTrades_(r.targets, r.plans); } catch (e) { Logger.log('仮想売買の記録に失敗（売買プランは正常）: ' + e.message); notes.push('仮想売買の記録に失敗（実行ログ参照）'); }
+  try { writeBriefingPicks_(r.targets, r.plans); } catch (e) { Logger.log('MarketBriefingへの書き込みに失敗（売買プランは正常）: ' + e.message); notes.push('MarketBriefing への書き込みに失敗（MARKET_BRIEFING_SS_ID を確認）'); }   // 価格を直したときに「日本株_買い推奨」も合わせる
+  try { ss.toast('売買プランを更新しました（買い推奨 ' + picks + '件 / 算出できた銘柄 ' + ok + '件 / 対象 ' + r.targets.length + '件）' + (notes.length ? '\n⚠ ' + notes.join(' / ') : ''), APP_NAME_, notes.length ? 12 : 6); } catch (e) { /* UIが無い実行（スマホ用Webメニューのトリガー）では出さない */ }
   hideWorkSheets_();
   return { picks: picks, ok: ok, targets: r.targets.length };
 }

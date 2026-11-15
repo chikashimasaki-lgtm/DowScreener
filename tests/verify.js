@@ -76,13 +76,14 @@ const EXPORTS = [
   'numbersNotInSource_', 'flagUnsourcedNumbers_', 'buildAiPrompt_', 'tradeOpinionPhrases_', 'flagTradeOpinion_',
   'summarizeConditions_', 'conditionSummaryLabel_', 'conditionStatusLabel_', 'macroStaleReason_', 'fetchNikkeiEps_',
   'readMacroInputSheet_', 'writeAlertSheet_', 'earningsByCodeFromRows_', 'calendarDateKey_', 'generateAiSummary', 'generateAiSummaryRun_',
-  'paperTradeEvaluate_', 'paperTradePnl_', 'paperUnrealized_',
+  'paperTradeEvaluate_', 'paperTradePnl_', 'paperUnrealized_', 'deprecatedSheetsPresent_',
   'wilsonInterval_', 'decideWeight_', 'SIGNAL_WEIGHT_', 'SIGNAL_DIR_',
 ];
 // 共通モジュール（symlink）も読み込む。本体が fetchWithRetry_ / confirmDestructive_ / to4_ を呼ぶため。
 const M = new Function(...Object.keys(sandbox), `
 ${read('FetchRetry.js')}
 ${read('ConfirmUi.js')}
+${read('MobileMenu.js')}
 ${read('StockCode.js')}
 ${read('SheetUtils.js')}
 ${read('SheetSize.js')}
@@ -95,7 +96,7 @@ ${read('MLWeights.js')}
 ${read('WebMenu.js')}
 ${read('AiRecommend.js')}
 ${read('PaperTrade.js')}
-return { ${EXPORTS.join(', ')} };
+return { ${EXPORTS.join(', ')}, MobileMenu, menuItems_, webMenuHtml_ };
 `)(...Object.values(sandbox));
 
 /* ── アサーション ─────────────────────────────────────────────────────────── */
@@ -1493,7 +1494,22 @@ console.log('\n【36】generateAiSummary — 実行記録に跡を残す（手�
   eq(typeof M.generateAiSummaryRun_, 'function', '本体 generateAiSummaryRun_ がある');
   const all = ['Code.js', 'AiRecommend.js', 'WebMenu.js', 'MarketMacro.js', 'PaperTrade.js', 'Bloomberg.js'].map(f => read(f)).join('\n');
   eq(/newTrigger\(\s*['"]generateAiSummary/.test(all), false, 'generateAiSummary のトリガーは作られていない（自動実行に繋げない）');
-  ok_(/addItem\([^)]*'generateAiSummary'\)/.test(read('Code.js')), 'メニュー項目（手動）は generateAiSummary のまま');
+  ok_(M.menuItems_().some(it => it.fn === 'generateAiSummary'), 'メニュー項目（手動）は generateAiSummary のまま');
+}
+
+console.log('\n【38】メニューの単一定義（PCとスマホで同じ項目）');
+{
+  const items = M.menuItems_();
+  eq(M.MobileMenu.problems(items), [], 'メニュー定義に不備が無い');
+  eq(items.length, 13, '全13項目');
+  const codeAll = ['Code.js', 'MarketMacro.js', 'AiRecommend.js', 'PaperTrade.js', 'WebMenu.js', 'Bloomberg.js'].map(f => read(f)).join('\n');
+  eq(items.filter(it => !new RegExp('^function ' + it.fn + '\\(', 'm').test(codeAll)).map(it => it.fn), [], '全項目の関数が実在する');
+  eq(items.filter(it => /リセット|削除/.test(it.label) && !it.confirm).map(it => it.fn), [], '消す操作にはスマホ用の確認文がある');
+  eq(items.filter(it => it.slow).map(it => it.fn), ['scanSignals', 'buildPlans'], '時間のかかる2つはトリガー経由');
+  const html = M.webMenuHtml_();
+  eq((html.match(/class="mm-b/g) || []).length, 11, 'スマホのページに専用ボタン2つ以外の11項目が並ぶ');
+  ok_(/id="b1"/.test(html) && /id="b2"/.test(html), '走査・プラン作り直しの専用ボタンは残る');
+  eq(/addItem\(/.test(read('Code.js')), false, 'Code.js に個別の addItem を残さない（定義は menuItems_ だけ）');
 }
 
 console.log('\n【33】保護ルール（tools/protect.js・検証用。本番には入れていない）');
@@ -1515,6 +1531,25 @@ console.log('\n【33】保護ルール（tools/protect.js・検証用。本番�
   const d = Object.assign({}, Z, { DD_LIMIT_R: 3, DD_LOOKBACK: 20, DD_PAUSE: 5 });
   eq(P.pgState_(cl, 13, d).pause, true, '落ち込み 4R ≥ 3R → 見送り');
   eq(P.pgState_(cl.slice(0, 2), 13, d).pause, false, '落ち込み 2R なら見送らない');
+}
+
+console.log('\n【37】UI/UX — 廃止シート削除の対象抽出・メニュー名の長さ・旧名の残り');
+{
+  eq(M.deprecatedSheetsPresent_(['売買プラン', '銘柄']), [], '廃止シートが無ければ空（「削除するシートはありません」で終わる）');
+  eq(M.deprecatedSheetsPresent_(['売買プラン', 'ML重み(参考)', 'ML学習データ']), ['ML学習データ', 'ML重み(参考)'], '存在する廃止シートだけを返す（売買プランは含まない）');
+  eq(M.deprecatedSheetsPresent_(null), [], 'null でも落ちない');
+  const code = read('Code.js');
+  const items = M.menuItems_().map(it => it.label);
+  ok_(items.length >= 10, 'メニュー項目を読み取れている（' + items.length + '件）');
+  items.filter(t => [...t].length > 30).forEach(t => ok_(false, 'メニュー名が30字超: ' + t));
+  eq(items.filter(t => [...t].length > 30).length, 0, 'メニュー名はすべて30字以内');
+  ok_(/removeDeprecatedSheets\(\) \{[\s\S]*?confirmDestructive_\(/.test(code), '廃止シート削除は確認ダイアログを通る');
+  ok_(/resetScanQueue\(\) \{[\s\S]*?confirmDestructive_\(/.test(code), '進捗リセットは確認ダイアログを通る');
+  // toast / alert の呼び出し行に旧名が残っていない（関数名・コメント・シート名は対象外）
+  const bad = ['Code.js', 'MarketMacro.js', 'AiRecommend.js', 'PaperTrade.js', 'Bloomberg.js', 'WebMenu.js']
+    .flatMap(f => read(f).split('\n').map((l, i) => [f, i + 1, l]))
+    .filter(([, , l]) => /(toast|alert)\(/.test(l) && /酒田/.test(l));
+  eq(bad.map(b => b[0] + ':' + b[1]), [], 'toast・alert に旧名「酒田」が残っていない');
 }
 
 console.log('\n' + '─'.repeat(62));

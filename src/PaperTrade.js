@@ -211,7 +211,7 @@ function updatePaperTrades_() {
     headers: { 'User-Agent': 'Mozilla/5.0' }, muteHttpExceptions: true,
   }));
   const resps = fetchAllWithRetry_(reqs);
-  if (!resps) return { checked: idx.length, settled: 0 };
+  if (!resps) return { checked: idx.length, settled: 0, fetchFailed: true };
 
   let settled = 0;
   idx.forEach((i, k) => {
@@ -240,4 +240,16 @@ function updatePaperTrades_() {
 }
 
 /** メニュー／トリガー用: 台帳の未決着分だけを更新する。 */
-function updatePaperTrades() { return runLogged_('仮想売買の更新', () => updatePaperTrades_()); }
+function updatePaperTrades() {
+  return runLogged_('仮想売買の更新', () => {
+    const r = updatePaperTrades_();
+    // 押しても何も表示されず、株価を取れなかったのか対象が無いのか分からなかった
+    try {
+      SpreadsheetApp.getActive().toast(r.fetchFailed
+        ? '株価を取得できず仮想売買を更新できませんでした。少し待ってからもう一度実行してください'
+        : (r.checked ? '仮想売買を更新しました（保有中 ' + r.checked + '件を判定、決着 ' + r.settled + '件）' : '判定する保有中の仮想売買はありません'),
+        APP_NAME_, 6);
+    } catch (e) { /* UIが無い実行では出さない */ }
+    return r;
+  });
+}
