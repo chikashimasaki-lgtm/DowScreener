@@ -42,7 +42,7 @@ function generateAiSummaryRun_() {
   const sh = ss.getSheetByName(SK.SHEETS.PLAN);
   const planRows = readPlanRowsForAi_(ss);
   if (!planRows.length) {
-    ss.toast('「' + SK.SHEETS.PLAN + '」に対象行がありません。先に「売買プランを作成/更新」を実行してください', APP_NAME_, 8);
+    ss.toast('「' + SK.SHEETS.PLAN + '」に対象行がありません。先にメニュー「売買プランだけ作り直す」を実行してください', APP_NAME_, 8);
     return;
   }
   const ctx = readMacroContextForAi_(ss);
