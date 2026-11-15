@@ -1496,6 +1496,27 @@ console.log('\n【36】generateAiSummary — 実行記録に跡を残す（手�
   ok_(/addItem\([^)]*'generateAiSummary'\)/.test(read('Code.js')), 'メニュー項目（手動）は generateAiSummary のまま');
 }
 
+console.log('\n【33】保護ルール（tools/protect.js・検証用。本番には入れていない）');
+{
+  const P = new Function(fs.readFileSync(path.join(__dirname, '..', 'tools', 'protect.js'), 'utf8') + '\nreturn { PG, pgState_ };')();
+  const Z = Object.assign({}, P.PG);
+  eq(Object.keys(Z).every(k => Z[k] === 0), true, '既定はすべて無効（0）');
+  const stop = (code, exitIdx) => ({ code, exitIdx, R: -1, why: 'stop' });
+  const cl = [stop('A', 10), stop('B', 11), stop('C', 12), stop('D', 13)];
+  eq(P.pgState_(cl, 13, Z).pause, false, '無効なら見送らない');
+  const g = Object.assign({}, Z, { GUARD_STOPS: 4, GUARD_LOOKBACK: 5, GUARD_PAUSE: 3 });
+  eq(P.pgState_(cl, 13, g).pause, true, '5営業日に損切り4回 → 見送り');
+  eq(P.pgState_(cl, 15, g).pause, false, '最初の損切りが5営業日より前に外れたら解除');
+  eq(P.pgState_(cl, 12, g).pause, false, '判断日より後の決済は見ない（先読みしない）');
+  eq(P.pgState_(cl.concat([stop('E', 14)]), 15, g).pauseUntil, 17, '見送りは最後の損切りから3営業日');
+  const c = Object.assign({}, Z, { COOLDOWN_DAYS: 10 });
+  eq(P.pgState_(cl, 15, c).locked, { A: 20, B: 21, C: 22, D: 23 }, '損切りした銘柄は10営業日ロック');
+  eq(P.pgState_([{ code: 'A', exitIdx: 10, R: 2, why: 'target' }], 12, c).locked, {}, '利確はロックしない');
+  const d = Object.assign({}, Z, { DD_LIMIT_R: 3, DD_LOOKBACK: 20, DD_PAUSE: 5 });
+  eq(P.pgState_(cl, 13, d).pause, true, '落ち込み 4R ≥ 3R → 見送り');
+  eq(P.pgState_(cl.slice(0, 2), 13, d).pause, false, '落ち込み 2R なら見送らない');
+}
+
 console.log('\n' + '─'.repeat(62));
 console.log(fail === 0 ? `全 ${pass} 項目 合格` : `${pass} 合格 / ${fail} 失敗`);
 process.exit(fail === 0 ? 0 : 1);

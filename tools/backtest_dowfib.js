@@ -124,6 +124,11 @@ for (const f of files) {
   }
 }
 
+// 保護ルールの検証（tools/backtest_protect.js）用に、全候補を書き出す。DUMP=<ファイル>
+if (process.env.DUMP) {
+  fs.writeFileSync(process.env.DUMP, JSON.stringify({ topN: M.DF.TOP_N, days: Object.keys(allFwd).sort(),
+    cands: [].concat(...Object.keys(byDay).map(d => byDay[d].map(x => ({ d, code: x.code, score: x.s.score, grade: x.s.grade, t: x.t })))) }));
+}
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const pct = x => (x * 100).toFixed(2) + '%';
 function report(label, picks, key, rkey) {

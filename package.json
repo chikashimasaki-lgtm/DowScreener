@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node tests/verify.js",
     "calc-weights": "node tools/calc_weights.js",
-    "backtest": "node tools/backtest_dowfib.js"
+    "backtest": "node tools/backtest_dowfib.js",
+    "backtest:protect": "node tools/backtest_protect.js",
+    "lookahead": "node tools/lookahead_check.js"
   },
   "license": "UNLICENSED"
 }
