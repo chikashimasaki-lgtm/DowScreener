@@ -94,8 +94,17 @@ function webBuildPlansJob() {
   return runLogged_('売買プラン作り直し（スマホ）', () => buildPlans());
 }
 
+// 上の2つ（走査・プラン作り直し）は専用ボタンがあるので、その下に残りの全メニューを並べる。
+// ボタンの実行は共通モジュール MobileMenu（mobileMenuRun）。定義は Code.js の menuItems_()。
+const WEB_TOP_FNS_ = ['scanSignals', 'buildPlans'];
+function webMenuHtml_() {
+  const rest = menuItems_().filter(it => WEB_TOP_FNS_.indexOf(it.fn) < 0);
+  return WEB_MENU_HTML_.replace('</body></html>',
+    '<script>function mmAfter(){ setTimeout(load, 2000); }</script>' + MobileMenu.block(rest) + '</body></html>');
+}
+
 function doGet() {
-  return HtmlService.createHtmlOutput(WEB_MENU_HTML_)
+  return HtmlService.createHtmlOutput(webMenuHtml_())
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setTitle('DowScreener');
 }

@@ -99,30 +99,33 @@ function onOpen() {
   // 既存のスプレッドシートを開いたときに追従させるためのもの。既に末尾なら何もしない。
   try { UsageSheet.moveToLast(SpreadsheetApp.getActiveSpreadsheet()); } catch (e) {}
 
-  const ui = SpreadsheetApp.getUi();
+  MobileMenu.addToUi(SpreadsheetApp.getUi(), APP_NAME_, menuItems_());
+}
 
-  // 日常的に押すのは上の2つだけ。残りは「たまに個別に更新したいもの」と
-  // 「初回設定・後片付け」なので、サブメニューへ畳んで最初の画面を短く保つ。
-  // 平日18時の走査トリガーが回っている限り、上の2つも押す必要はない。
-  ui.createMenu(APP_NAME_)
-    .addItem('走査/続行（買い推奨と売買プランを更新）', 'scanSignals')
-    .addItem('売買プランだけ作り直す（買い推奨＋保有株）', 'buildPlans')
-    .addSeparator()
-    .addSubMenu(ui.createMenu('個別に更新')
-      .addItem('相場マクロ/急落サインを更新',   'updateMarketMacro')
-      .addItem('決算カレンダーを更新',          'updateEarningsCalendar')
-      .addItem('仮想売買を更新（買い推奨を買ったと仮定した結果）', 'updatePaperTrades')
-      .addItem('AI推奨コメントを生成（参考・投資助言ではありません）', 'generateAiSummary'))
-    .addSubMenu(ui.createMenu('設定とメンテナンス')
-      .addItem('セットアップ',                  'setup')
-      .addItem('プライム銘柄を取得（J-Quants）', 'fetchPrimeUniverse')
-      .addItem('自動実行を設定（点検7:30・マクロ17時・走査18時）', 'installDailyScanTrigger')
-      .addSeparator()
-      .addItem('使い方シートを作成/更新', 'createUsageSheet')
-      .addItem('シート順序を整える',      'ensureSheetOrder')
-      .addItem('走査の進捗リセット',      'resetScanQueue')
-      .addItem('廃止シートを削除（一度だけ）', 'removeDeprecatedSheets'))
-    .addToUi();
+// メニューの定義はここ1か所。PCのメニュー（onOpen）とスマホ用ページ（WebMenu.js）の両方がこれを使う。
+// 日常的に押すのは上の2つだけ。残りは「たまに個別に更新したいもの」と「初回設定・後片付け」なので
+// サブメニューへ畳む。平日18時の走査トリガーが回っている限り、上の2つも押す必要はない。
+// slow: 6分を超えうるので、スマホからはトリガーへ渡して実行する。
+// confirm: スマホのページで出す確認文（Webからは getUi の確認ダイアログが出せないため、必ず書く）。
+function menuItems_() {
+  const M = '個別に更新', S = '設定とメンテナンス';
+  return [
+    { label: '走査/続行（買い推奨と売買プランを更新）', fn: 'scanSignals', slow: true },
+    { label: '売買プランだけ作り直す（買い推奨＋保有株）', fn: 'buildPlans', slow: true },
+    { group: M, label: '相場マクロ/急落サインを更新', fn: 'updateMarketMacro' },
+    { group: M, label: '決算カレンダーを更新', fn: 'updateEarningsCalendar' },
+    { group: M, label: '仮想売買を更新（買い推奨を買ったと仮定した結果）', fn: 'updatePaperTrades' },
+    { group: M, label: 'AI推奨コメントを生成（参考・投資助言ではありません）', fn: 'generateAiSummary' },
+    { group: S, label: 'セットアップ', fn: 'setup' },
+    { group: S, label: 'プライム銘柄を取得（J-Quants）', fn: 'fetchPrimeUniverse' },
+    { group: S, label: '自動実行を設定（点検7:30・マクロ17時・走査18時）', fn: 'installDailyScanTrigger' },
+    { group: S, label: '使い方シートを作成/更新', fn: 'createUsageSheet' },
+    { group: S, label: 'シート順序を整える', fn: 'ensureSheetOrder' },
+    { group: S, label: '走査の進捗リセット', fn: 'resetScanQueue',
+      confirm: '走査の途中経過を消し、自動再開の予約も取り消します。次回は最初の銘柄からやり直しになります。よろしいですか？' },
+    { group: S, label: '廃止シートを削除（一度だけ）', fn: 'removeDeprecatedSheets',
+      confirm: '廃止済みのシート（ML学習データ・ML重み(参考)・AI推奨（参考））を削除します。元に戻せません。よろしいですか？' },
+  ];
 }
 
 // 破壊的操作の確認 confirmDestructive_() の本体は共通モジュール ConfirmUi.js
