@@ -117,7 +117,7 @@ function menuItems_() {
     { group: M, label: '仮想売買を更新（買い推奨を買ったと仮定した結果）', fn: 'updatePaperTrades' },
     { group: M, label: 'AI推奨コメントを生成（参考・投資助言ではありません）', fn: 'generateAiSummary' },
     { group: S, label: 'セットアップ', fn: 'setup' },
-    { group: S, label: 'プライム銘柄を取得（J-Quants）', fn: 'fetchPrimeUniverse' },
+    { group: S, label: 'プライム銘柄を取得（J-Quants）', fn: 'fetchPrimeUniverse', confirm: '「銘柄」シートの内容をすべて置き換えます。手入力した銘柄も消えます。続行しますか？' },
     { group: S, label: '自動実行を設定（点検7:30・マクロ17時・走査18時）', fn: 'installDailyScanTrigger' },
     { group: S, label: '使い方シートを作成/更新', fn: 'createUsageSheet' },
     { group: S, label: 'シート順序を整える', fn: 'ensureSheetOrder' },
@@ -191,6 +191,8 @@ function fetchPrimeUniverse() {
     pagination = j.pagination_key || null;
   } while (pagination);
 
+  // 0件のまま消すと銘柄シートが空になる（API の応答形式が変わったとき等）。消す前に止める。
+  if (!collect.length) throw new Error('プライム銘柄を1件も取得できませんでした。「銘柄」シートは変更していません');
   const uni = SpreadsheetApp.getActive().getSheetByName(SK.SHEETS.UNIVERSE);
   uni.clear();
   ensureSheetSize_(uni, Math.max(collect.length + 1, 2), 2);   // 新規作成時に空白を削ってあるので、書く前に行を確保
