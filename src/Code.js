@@ -1382,6 +1382,11 @@ function createUsageSheet() {
     ['   Apps Scriptエディタ → 左の歯車（プロジェクトの設定） → スクリプト プロパティ から設定します。', 'p'],
   ];
 
+  // スマホ用ページのURL（デプロイ後に mobileMenuSetUrl で保存したもの）があれば、先頭の説明のすぐ後ろに載せる
+  const mobile = MobileMenu.usageLine();
+  if (mobile) rows.splice(2, 0, ['■ スマホから操作する', 'h'], [mobile, 'p'],
+    ['スマホのスプレッドシートアプリにはメニューが出ません。上のページに、メニューの全項目が並んでいます。', 'note'], ['', 'p']);
+
   return UsageSheet.buildDoc(SpreadsheetApp.getActive(), SK.SHEETS.USAGE, rows);
 }
 
