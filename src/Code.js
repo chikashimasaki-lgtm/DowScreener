@@ -511,7 +511,7 @@ function removeDeprecatedSheets() {
 function ensureSheetOrder() {
   const ss = SpreadsheetApp.getActive();
   const order = [
-    SK.SHEETS.PLAN, MACRO.INPUT_SHEET, JPX_MARGIN.SHEET, MACRO.CALENDAR_SHEET, SK.SHEETS.UNIVERSE,
+    SK.SHEETS.PLAN, MACRO.INPUT_SHEET, JPX_MARGIN.SHEET2, MACRO.CALENDAR_SHEET, SK.SHEETS.UNIVERSE,
     SK.SHEETS.USAGE,
   ];
   let moved = 0;
@@ -697,6 +697,7 @@ function getSbiHeldCodes_() {
   // コード→{shares, cost}。現物と信用の両方に同じ銘柄があれば株数を合算し、
   // 取得単価は株数で加重平均する（売買プランの損切り額を建玉全体で出すため）。
   const positions = {};
+  const names = {};
   const addPos = (code, shares, cost) => {
     if (!(shares > 0)) return;
     const p = positions[code] || (positions[code] = { shares: 0, costSum: 0, costQty: 0, cost: null });
@@ -742,19 +743,21 @@ function getSbiHeldCodes_() {
     const findCol = cands => data[hi].findIndex(v => cands.indexOf(String(v || '').trim()) >= 0);
     const qi = findCol(HELD_QTY_HEADERS_);
     const pi = findCol(HELD_COST_HEADERS_);
+    const ni = findCol(['銘柄名称', '銘柄名', '銘柄']);   // 銘柄シートに無いETF等の名前を補う
     let hit = 0;
     for (let r = hi + 1; r < data.length; r++) {
       const s = to4_(String(data[r][ci] || '').trim()).toUpperCase();   // 5桁→4桁に正規化
       if (!CODE_RE.test(s)) continue;
       set.add(s);
       hit++;
+      if (ni >= 0 && data[r][ni]) names[s] = String(data[r][ni]).trim();
       if (qi >= 0) addPos(s, toNum_(data[r][qi]), pi >= 0 ? toNum_(data[r][pi]) : null);
     }
     Logger.log('保有取得: シート「' + name + '」データ行 ' + (data.length - hi - 1)
       + ' / コード一致 ' + hit + ' / 数量列' + (qi >= 0 ? '発見' : '無し'));
   });
   Logger.log('SBI保有銘柄コード: ' + set.size + '件（数量取得 ' + Object.keys(positions).length + '件）');
-  return { codes: set, positions: positions, reason: null };
+  return { codes: set, positions: positions, names: names, reason: null };
 }
 
 // ============================================================================
@@ -1368,6 +1371,12 @@ function createUsageSheet() {
     ['・相場マクロ … 地合いの参考表示（手入力＋自動取得）。推奨の判定には使っていません', 'p'],
     ['   （日経平均のトレンドで絞っても成績が変わらなかったため）', 'p'],
     ['・決算カレンダー … 14日先までの決算発表予定（edinetdb.jp、EDINETDB_API_KEY が必要）', 'p'],
+    ['・仮想売買 … 買い推奨を「翌朝の寄付で買った」と仮定して追跡する記録（実際には買いません）。新しい順', 'p'],
+    ['   状態（保有中／利確／損切り／期限切れ／見送り）・損益・現在価格（保有中は最新終値）・含み益を毎日更新します', 'p'],
+    ['   右の集計欄は決済件数・利確率・損益合計など（見送り・保有中は含めません）', 'p'],
+    ['・2市場信用倍率 … JPXの週次「信用取引現在高」から、二市場合計の売り残・買い残・信用倍率を週1行で貯めます（新しい順）', 'p'],
+    ['   売り残が8000億円（800,000百万円）以下なら赤字。信用評価損益率はトレーダーズ・ウェブから補い、正は赤・負は青です', 'p'],
+    ['   毎日19時に確認し、評価損益率までそろった週に1回だけ「【信用残】…」のメールを送ります（7日待ってもそろわなければ空欄で送信）', 'p'],
     ['・「シグナル」「パターン成績」… 走査の作業用と旧集計。走査後は自動で非表示になります', 'p'],
     ['', 'p'],
     ['■ 自動実行', 'h'],
@@ -1380,6 +1389,10 @@ function createUsageSheet() {
     ['ダウ理論 … 高値と安値がそろって切り上がっていれば上昇トレンド、とみなす考え方。', 'p'],
     ['   トレンドは転換のはっきりした合図が出るまで続く、とします。', 'p'],
     ['フィボナッチ … 上昇幅に対する押しの深さを 23.6%・38.2%・61.8%・78.6% などの比率で測る方法。', 'p'],
+    ['信用評価損益率 … 信用取引の買い方が持つ建玉全体の含み損益を、取得額に対する割合で表した数字（一般的な定義）。', 'p'],
+    ['   マイナスは買い方全体で含み損、プラスは含み益。−15%なら建玉の取得額の約15%が損になっています（平均で、全員が損という意味ではありません）。', 'p'],
+    ['   含み損が大きいと損切り・追証の売りが出やすく上値が重くなりやすい、と言われます。売り過ぎの目安として見られることもあります。', 'p'],
+    ['   このシートでは正＝赤、負＝青（トレーダーズ・ウェブの色分けと同じ）。', 'p'],
     ['スクリプトプロパティ … Apps Scriptに設定値（APIキー等）を保存する場所。', 'p'],
     ['   Apps Scriptエディタ → 左の歯車（プロジェクトの設定） → スクリプト プロパティ から設定します。', 'p'],
   ];
@@ -1939,6 +1952,16 @@ function fmtNum_(v) {
  * まずやることは新規建てではなく返済売の置き直しなので、買いプランを併記すると
  * どちらを実行すべきか迷う。買い増し候補であることはメモに残す。
  */
+// 「銘柄」シート（コード→銘柄名）。保有株が候補に無いと名前が空になるので、その補い用。読めなければ空。
+function universeNames_() {
+  const out = {};
+  try {
+    const sh = SpreadsheetApp.getActive().getSheetByName(SK.SHEETS.UNIVERSE);
+    if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues().forEach(r => { if (r[0]) out[String(r[0])] = r[1]; });
+  } catch (e) { Logger.log('銘柄名の読み込みに失敗: ' + e.message); }
+  return out;
+}
+
 function planTargets_(cands, held) {
   const codes = held && held.codes ? held.codes : new Set();
   const positions = (held && held.positions) || {};
@@ -1954,7 +1977,7 @@ function planTargets_(cands, held) {
   codes.forEach(code => {
     const c = byCode[code];
     holds.push({
-      kind: '保有', pick: false, code: code, name: c ? c.name : '', reason: c ? c.reason : '',
+      kind: '保有', pick: false, code: code, name: c ? c.name : ((held && held.names && held.names[code]) || ''), reason: c ? c.reason : '',
       note: c ? '買い推奨の条件にも該当（買い増し候補・確度' + c.setup.grade + '）' : '',
       pos: positions[code] || { shares: 0, cost: null }, extra: [],
     });
@@ -2149,6 +2172,9 @@ function buildPlansFromSignals_(sig) {
     notes.push('保有銘柄を読めず買い推奨のみです（Asset_Status の共有・権限を確認）');
   }
   rememberSpreadsheetId_();   // スマホ用Webメニュー（WebMenu.js）が開けなかったときの予備
+  const un = universeNames_();   // 買い推奨に出ない保有株の銘柄名を「銘柄」シート→SBI保有シートの順で補う
+  held.names = Object.assign({}, held.names || {}, un);
+  Object.keys(un).forEach(k => { if (!un[k]) delete held.names[k]; });
   const targets = planTargets_(cands, held);
   attachPlanExtras_(targets);
   return { targets: targets, plans: writePlanSheet_(targets), notes: notes };
