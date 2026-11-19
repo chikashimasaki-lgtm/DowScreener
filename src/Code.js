@@ -697,6 +697,7 @@ function getSbiHeldCodes_() {
   // コード→{shares, cost}。現物と信用の両方に同じ銘柄があれば株数を合算し、
   // 取得単価は株数で加重平均する（売買プランの損切り額を建玉全体で出すため）。
   const positions = {};
+  const names = {};
   const addPos = (code, shares, cost) => {
     if (!(shares > 0)) return;
     const p = positions[code] || (positions[code] = { shares: 0, costSum: 0, costQty: 0, cost: null });
@@ -742,19 +743,21 @@ function getSbiHeldCodes_() {
     const findCol = cands => data[hi].findIndex(v => cands.indexOf(String(v || '').trim()) >= 0);
     const qi = findCol(HELD_QTY_HEADERS_);
     const pi = findCol(HELD_COST_HEADERS_);
+    const ni = findCol(['銘柄名', '銘柄']);   // 銘柄シートに無いETF等の名前を補う
     let hit = 0;
     for (let r = hi + 1; r < data.length; r++) {
       const s = to4_(String(data[r][ci] || '').trim()).toUpperCase();   // 5桁→4桁に正規化
       if (!CODE_RE.test(s)) continue;
       set.add(s);
       hit++;
+      if (ni >= 0 && data[r][ni]) names[s] = String(data[r][ni]).trim();
       if (qi >= 0) addPos(s, toNum_(data[r][qi]), pi >= 0 ? toNum_(data[r][pi]) : null);
     }
     Logger.log('保有取得: シート「' + name + '」データ行 ' + (data.length - hi - 1)
       + ' / コード一致 ' + hit + ' / 数量列' + (qi >= 0 ? '発見' : '無し'));
   });
   Logger.log('SBI保有銘柄コード: ' + set.size + '件（数量取得 ' + Object.keys(positions).length + '件）');
-  return { codes: set, positions: positions, reason: null };
+  return { codes: set, positions: positions, names: names, reason: null };
 }
 
 // ============================================================================
@@ -2165,7 +2168,9 @@ function buildPlansFromSignals_(sig) {
     notes.push('保有銘柄を読めず買い推奨のみです（Asset_Status の共有・権限を確認）');
   }
   rememberSpreadsheetId_();   // スマホ用Webメニュー（WebMenu.js）が開けなかったときの予備
-  held.names = universeNames_();   // 買い推奨に出ない保有株の銘柄名を「銘柄」シートから補う
+  const un = universeNames_();   // 買い推奨に出ない保有株の銘柄名を「銘柄」シート→SBI保有シートの順で補う
+  held.names = Object.assign({}, held.names || {}, un);
+  Object.keys(un).forEach(k => { if (!un[k]) delete held.names[k]; });
   const targets = planTargets_(cands, held);
   attachPlanExtras_(targets);
   return { targets: targets, plans: writePlanSheet_(targets), notes: notes };
