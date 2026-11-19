@@ -511,7 +511,7 @@ function removeDeprecatedSheets() {
 function ensureSheetOrder() {
   const ss = SpreadsheetApp.getActive();
   const order = [
-    SK.SHEETS.PLAN, MACRO.INPUT_SHEET, JPX_MARGIN.SHEET, MACRO.CALENDAR_SHEET, SK.SHEETS.UNIVERSE,
+    SK.SHEETS.PLAN, MACRO.INPUT_SHEET, JPX_MARGIN.SHEET2, MACRO.CALENDAR_SHEET, SK.SHEETS.UNIVERSE,
     SK.SHEETS.USAGE,
   ];
   let moved = 0;

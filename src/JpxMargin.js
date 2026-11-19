@@ -1,12 +1,10 @@
 // JPX週次「信用取引現在高」(YYYYMMDD_mtcurrent.xlsx) の自動取得と履歴シート。
 // ページ margin/04.html のリンクから最新週を辿る（GASから取得できることを2026-10-24に確認）。
-// 東京市場の合計（売残・買残・前週比）を読み、'信用残推移' シートに申込み日ごとに1行ずつ貯める。
+// 東京市場の合計（売残・買残・前週比）を読み、「2市場信用倍率」シートに週ごとに1行ずつ貯める（旧「信用残推移」は2026-11-19に統合・削除）。
 const JPX_MARGIN = {
   BASE: 'https://www.jpx.co.jp',
   PAGE: '/markets/statistics-equities/margin/04.html',
-  SHEET: '信用残推移',
-  HEADER: ['申込み日', '売残(億円)', '売残 前週比', '買残(億円)', '買残 前週比', '信用倍率(株数)', '信用倍率(金額)', '取得日'],
-  WEEKS: 4,           // ページに載っている直近週のうち、取り込む上限
+  WEEKS: 8,           // ページに載っている直近週のうち、取り込む上限
   STALE_DAYS: 14,     // 申込み日からこの日数を超えたら「古い」と警告
   TAB_COLOR: '#795548',
   SHEET2: '2市場信用倍率',
@@ -73,46 +71,17 @@ function readJpxMtcurrentXlsx_(url) {
   }
 }
 
-function ensureJpxMarginSheet_() {
-  const ss = SpreadsheetApp.getActive();
-  let sh = ss.getSheetByName(JPX_MARGIN.SHEET);
-  if (sh) return sh;
-  sh = ss.insertSheet(JPX_MARGIN.SHEET);
-  const H = JPX_MARGIN.HEADER;
-  sh.getRange(1, 1, 1, H.length).setValues([H]).setFontWeight('bold').setBackground('#37474F').setFontColor('#FFFFFF');
-  sh.setColumnWidths(1, H.length, 110);
-  sh.setTabColor(JPX_MARGIN.TAB_COLOR);
-  sh.getRange(2, 2, 500, 5).setNumberFormat('#,##0');
-  sh.getRange(2, 6, 500, 2).setNumberFormat('0.00');
-  if (typeof trimSheet_ === 'function') trimSheet_(sh);
-  try { if (typeof SheetOrder !== 'undefined' && SheetOrder.saved()) SheetOrder.lock(ss); } catch (e) { /* 固定記録が無ければ何もしない */ }
-  return sh;
-}
-
-// 直近の週を取り込み、履歴シートに無い申込み日だけ追記する。返り値は最新週の値（無ければ null）。
+// 最新週の値だけを読んで返す（相場マクロ用）。履歴は「2市場信用倍率」シートに集約したので、ここではシートに書かない（2026-11-19 旧「信用残推移」を統合）。
 function syncJpxMarginHistory_() {
   const page = UrlFetchApp.fetch(JPX_MARGIN.BASE + JPX_MARGIN.PAGE, { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (page.getResponseCode() !== 200) throw new Error('JPXページ HTTP ' + page.getResponseCode());
-  const links = parseJpxMtcurrentLinks_(page.getContentText()).slice(0, JPX_MARGIN.WEEKS);
+  const links = parseJpxMtcurrentLinks_(page.getContentText());
   if (!links.length) throw new Error('JPXページに _mtcurrent.xlsx のリンクがありません');
-  const sh = ensureJpxMarginSheet_();
-  const have = {};
-  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().forEach(r => { have[r[0]] = true; });
-  const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd');
-  let latest = null;
-  links.slice().reverse().forEach(l => {   // 古い週から順に追記して、シートは日付昇順を保つ
-    const ymd = l.ymd.slice(0, 4) + '/' + l.ymd.slice(4, 6) + '/' + l.ymd.slice(6, 8);
-    const isNewest = l === links[0];
-    if (have[ymd] && !isNewest) return;
-    const r = readJpxMtcurrentXlsx_(JPX_MARGIN.BASE + l.href);
-    if (!r) throw new Error('mtcurrent のパース失敗: ' + l.ymd);
-    r.date = r.date || ymd;
-    if (isNewest) latest = r;
-    if (have[r.date]) return;
-    sh.appendRow([r.date, r.sellOku, r.sellChgOku, r.buyOku, r.buyChgOku, r.ratioShares, r.ratioVal, today]);
-    have[r.date] = true;
-  });
-  return latest;
+  const l = links[0];
+  const r = readJpxMtcurrentXlsx_(JPX_MARGIN.BASE + l.href);
+  if (!r) throw new Error('mtcurrent のパース失敗: ' + l.ymd);
+  r.date = r.date || (l.ymd.slice(0, 4) + '/' + l.ymd.slice(4, 6) + '/' + l.ymd.slice(6, 8));
+  return r;
 }
 
 // 「2市場信用倍率」シート：二市場合計の売り残・買い残・信用倍率を週1行で貯める。

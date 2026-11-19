@@ -281,10 +281,10 @@ function claspJpxFetchTry() {
 // 診断用: JPX直取得→履歴シート追記を1回実行して、最新週の値を返す。
 function claspJpxSync() { return syncJpxMarginHistory_(); }
 
-// 診断用（読み取り専用）: 信用残推移シートの全行と、相場マクロの売残欄を返す。
+// 診断用（読み取り専用）: 2市場信用倍率シートの全行と、相場マクロの売残欄を返す。
 function claspJpxHistory() {
   const ss = SpreadsheetApp.getActive();
-  const sh = ss.getSheetByName(JPX_MARGIN.SHEET);
+  const sh = ss.getSheetByName(JPX_MARGIN.SHEET2);
   const m = ss.getSheetByName(MACRO.INPUT_SHEET);
   return {
     hist: sh ? sh.getDataRange().getDisplayValues().map(r => r.join(' | ')) : null,
