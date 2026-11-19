@@ -1945,6 +1945,16 @@ function fmtNum_(v) {
  * まずやることは新規建てではなく返済売の置き直しなので、買いプランを併記すると
  * どちらを実行すべきか迷う。買い増し候補であることはメモに残す。
  */
+// 「銘柄」シート（コード→銘柄名）。保有株が候補に無いと名前が空になるので、その補い用。読めなければ空。
+function universeNames_() {
+  const out = {};
+  try {
+    const sh = SpreadsheetApp.getActive().getSheetByName(SK.SHEETS.UNIVERSE);
+    if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues().forEach(r => { if (r[0]) out[String(r[0])] = r[1]; });
+  } catch (e) { Logger.log('銘柄名の読み込みに失敗: ' + e.message); }
+  return out;
+}
+
 function planTargets_(cands, held) {
   const codes = held && held.codes ? held.codes : new Set();
   const positions = (held && held.positions) || {};
@@ -1960,7 +1970,7 @@ function planTargets_(cands, held) {
   codes.forEach(code => {
     const c = byCode[code];
     holds.push({
-      kind: '保有', pick: false, code: code, name: c ? c.name : '', reason: c ? c.reason : '',
+      kind: '保有', pick: false, code: code, name: c ? c.name : ((held && held.names && held.names[code]) || ''), reason: c ? c.reason : '',
       note: c ? '買い推奨の条件にも該当（買い増し候補・確度' + c.setup.grade + '）' : '',
       pos: positions[code] || { shares: 0, cost: null }, extra: [],
     });
@@ -2155,6 +2165,7 @@ function buildPlansFromSignals_(sig) {
     notes.push('保有銘柄を読めず買い推奨のみです（Asset_Status の共有・権限を確認）');
   }
   rememberSpreadsheetId_();   // スマホ用Webメニュー（WebMenu.js）が開けなかったときの予備
+  held.names = universeNames_();   // 買い推奨に出ない保有株の銘柄名を「銘柄」シートから補う
   const targets = planTargets_(cands, held);
   attachPlanExtras_(targets);
   return { targets: targets, plans: writePlanSheet_(targets), notes: notes };

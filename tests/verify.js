@@ -912,7 +912,9 @@ console.log('\n【17】ダウ理論のスイングとトレンド判定');
     eq(targets[2].note, '買い推奨の条件にも該当（買い増し候補・確度B）', '保有中に条件を満たしたら買い増し候補としてメモに残す');
     eq(targets[2].pos, { shares: 200, cost: 1400 }, '保有数量と建値を引き当てる');
     eq(targets[1].pos, { shares: 0, cost: null }, '数量が取れない保有銘柄も落とさない');
-    eq(M.planTargets_([], { codes: new Set(), positions: {} }), [], '対象が無ければ空');
+    { const tg = M.planTargets_([], { codes: new Set(['1329']), positions: {}, names: { '1329': 'ＩＳ日経２２５' } });
+    eq(tg[0].name, 'ＩＳ日経２２５', '候補に無い保有株の銘柄名は銘柄シートから補う'); }
+  eq(M.planTargets_([], { codes: new Set(), positions: {} }), [], '対象が無ければ空');
 
     const buyT = Object.assign(targets[0], { extra: ['決算 2026-10-28(予測)'] });
     const op = Object.assign({ held: false }, M.dfOrderPlan_(setup, cfg()));
