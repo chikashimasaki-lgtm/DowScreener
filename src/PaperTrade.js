@@ -13,9 +13,10 @@
 
 const PT_SHEET_ = '仮想売買';
 const PT_HEADERS_ = ['記録日', 'コード', '銘柄名', '確度', '買い(翌寄付)', '利確', '損切り', '株数',
-  '状態', '決済日', '決済価格', '損益(円)', '損益%', '保有日数', '含み益(円)'];
+  '状態', '決済日', '決済価格', '損益(円)', '損益%', '保有日数', '現在価格', '含み益(円)'];
 const PT_COL_ = { DATE: 1, CODE: 2, NAME: 3, GRADE: 4, ENTRY: 5, TARGET: 6, STOP: 7, SHARES: 8,
-  STATE: 9, EXIT_DATE: 10, EXIT: 11, PNL: 12, PCT: 13, DAYS: 14, UNREAL: 15 };
+  STATE: 9, EXIT_DATE: 10, EXIT: 11, PNL: 12, PCT: 13, DAYS: 14, CUR: 15, UNREAL: 16 };
+const PT_SUM_COL_ = PT_HEADERS_.length + 1;   // 集計欄は表の右（見出しの次の列から2列）
 const PT_OPEN_ = '保有中', PT_WIN_ = '利確', PT_LOSS_ = '損切り', PT_EXPIRED_ = '期限切れ', PT_SKIP_ = '見送り';
 
 /**
@@ -66,10 +67,17 @@ function paperUnrealized_(entry, lastClose, shares) {
   return Math.round((lastClose - entry) * shares);
 }
 
-/** 既存の台帳に「含み益(円)」列の見出しが無ければ足す（見出しの書式は隣の列から写す。他のセルは触らない）。 */
+/**
+ * 既存の台帳に「現在価格」列が無ければ、含み益(円)の左に1列挿入する（2026-11-19）。
+ * 挿入で右の集計欄も1列右へ動く（数式の参照は自動で追従）。見出しの書式は隣の列から写す。他のセルは触らない。
+ */
 function paperEnsureColumns_(sh) {
-  const c = PT_COL_.UNREAL;
+  const c = PT_COL_.CUR;
   if (sh.getRange(1, c).getValue() === PT_HEADERS_[c - 1]) return;
+  if (sh.getRange(1, c).getValue() === '含み益(円)') {   // 旧レイアウト: 現在価格を挟む
+    ensureSheetSize_(sh, 2, sh.getMaxColumns() + 1);
+    sh.insertColumnBefore(c);
+  }
   sh.getRange(1, c - 1).copyTo(sh.getRange(1, c), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
   sh.getRange(1, c).setValue(PT_HEADERS_[c - 1]);
 }
@@ -105,18 +113,18 @@ function paperBodyColor_(sh) {
   const n = Math.max(sh.getMaxRows() - 1, 1), C = PT_COL_;
   const col = c => sh.getRange(2, c, n, 1);
   sh.getRange(2, 1, n, PT_HEADERS_.length).setFontColor('#000000').setVerticalAlignment('middle');
-  sh.getRange(2, 16, 9, 2).setFontColor('#000000');
-  [C.ENTRY, C.TARGET, C.STOP, C.EXIT].forEach(c => col(c).setNumberFormat('#,##0.##').setHorizontalAlignment('right'));
+  sh.getRange(2, PT_SUM_COL_, 9, 2).setFontColor('#000000');
+  [C.ENTRY, C.TARGET, C.STOP, C.EXIT, C.CUR].forEach(c => col(c).setNumberFormat('#,##0.##').setHorizontalAlignment('right'));
   [C.SHARES, C.PNL, C.UNREAL].forEach(c => col(c).setNumberFormat('#,##0').setHorizontalAlignment('right'));
   col(C.PCT).setNumberFormat('#,##0.00').setHorizontalAlignment('right');
   col(C.DAYS).setNumberFormat('0').setHorizontalAlignment('right');
   col(C.CODE).setNumberFormat('@').setHorizontalAlignment('right');
   [C.DATE, C.GRADE, C.STATE, C.EXIT_DATE].forEach(c => col(c).setHorizontalAlignment('center'));
   col(C.NAME).setHorizontalAlignment('left');
-  sh.getRange(7, 17).setNumberFormat('#,##0');
+  sh.getRange(7, PT_SUM_COL_ + 1).setNumberFormat('#,##0');
 }
 
-/** 台帳を記録日の新しい順に並べる（集計欄のP:Q列は動かさない）。 */
+/** 台帳を記録日の新しい順に並べる（集計欄は動かさない）。 */
 function paperSort_(sh) {
   const last = paperLastRow_(sh);
   if (last >= 3) sh.getRange(2, 1, last - 1, PT_HEADERS_.length).sort({ column: PT_COL_.DATE, ascending: false });
@@ -139,17 +147,17 @@ function paperSheet_() {
     ['利確', '=COUNTIF(' + state + ',"' + PT_WIN_ + '")'],
     ['損切り', '=COUNTIF(' + state + ',"' + PT_LOSS_ + '")'],
     ['期限切れ', '=COUNTIF(' + state + ',"' + PT_EXPIRED_ + '")'],
-    ['利確率', '=IFERROR(Q3/Q2,"")'],
+    ['利確率', '=IFERROR(R3/R2,"")'],
     ['損益合計(円)', '=SUM(' + pnl + ')'],
     ['平均損益%', '=IFERROR(AVERAGE(' + pct + '),"")'],
     ['保有中', '=COUNTIF(' + state + ',"' + PT_OPEN_ + '")'],
     ['見送り', '=COUNTIF(' + state + ',"' + PT_SKIP_ + '")']];
-  sh.getRange(1, 16, lab.length, 1).setValues(lab.map(r => [r[0]]));
-  sh.getRange(2, 17, lab.length - 1, 1).setFormulas(lab.slice(1).map(r => [r[1]]));
-  sh.getRange(1, 16, 1, 2).merge().setFontWeight('bold').setBackground('#141a33').setFontColor('#ffffff');
-  sh.getRange(7, 17).setNumberFormat('#,##0');
-  sh.getRange(6, 17).setNumberFormat('0.0%');
-  sh.getRange(8, 17).setNumberFormat('0.00');
+  sh.getRange(1, PT_SUM_COL_, lab.length, 1).setValues(lab.map(r => [r[0]]));
+  sh.getRange(2, PT_SUM_COL_ + 1, lab.length - 1, 1).setFormulas(lab.slice(1).map(r => [r[1]]));
+  sh.getRange(1, PT_SUM_COL_, 1, 2).merge().setFontWeight('bold').setBackground('#141a33').setFontColor('#ffffff');
+  sh.getRange(7, PT_SUM_COL_ + 1).setNumberFormat('#,##0');
+  sh.getRange(6, PT_SUM_COL_ + 1).setNumberFormat('0.0%');
+  sh.getRange(8, PT_SUM_COL_ + 1).setNumberFormat('0.00');
   sh.getRange(2, PT_COL_.PNL, sh.getMaxRows() - 1, 1).setNumberFormat('#,##0');
   paperBodyColor_(sh);
   sh.setTabColor('#7a5af8');
@@ -176,7 +184,7 @@ function recordPaperTrades_(targets, plans) {
     if (have.has(today + '|' + t.code)) return;
     const p = plans[t.code];
     rows.push([today, t.code, t.name, String(t.kind || '').replace('買い推奨', ''), '', p.target, p.stop, p.shares || '',
-      PT_OPEN_, '', '', '', '', '', '']);
+      PT_OPEN_, '', '', '', '', '', '', '']);
   });
   if (!rows.length) return 0;
   const start = Math.max(last, 1) + 1;
@@ -226,14 +234,17 @@ function updatePaperTrades_() {
     if (ev.state === PT_OPEN_) {
       if (ev.days) sh.getRange(row, PT_COL_.DAYS).setValue(ev.days);
       const entry = ev.entry != null ? ev.entry : Number(r[PT_COL_.ENTRY - 1]);
-      sh.getRange(row, PT_COL_.UNREAL).setValue(paperUnrealized_(entry, after.length ? after[after.length - 1].c : 0, Number(r[PT_COL_.SHARES - 1])));
+      const lastClose = after.length ? after[after.length - 1].c : 0;
+      sh.getRange(row, PT_COL_.CUR).setValue(lastClose > 0 ? lastClose : '');   // 現在価格 = 最新終値
+      sh.getRange(row, PT_COL_.UNREAL).setValue(paperUnrealized_(entry, lastClose, Number(r[PT_COL_.SHARES - 1])));
       return;
     }
     const pnl = paperTradePnl_(ev, Number(r[PT_COL_.SHARES - 1]));
     const exitDate = ev.exitIndex >= 0 ? paperDateKey_(after[ev.exitIndex].t) : paperDateKey_(after[0].t);
     sh.getRange(row, PT_COL_.STATE, 1, 6).setValues([[ev.state, exitDate, ev.exitPrice == null ? '' : ev.exitPrice,
       pnl.yen, pnl.pct, ev.days || '']]);
-    sh.getRange(row, PT_COL_.UNREAL).setValue('');   // 決済したら含み益は消す（損益(円)に確定）
+    sh.getRange(row, PT_COL_.CUR).setValue('');
+    sh.getRange(row, PT_COL_.UNREAL).setValue('');   // 決済したら現在価格・含み益は消す（損益(円)に確定）
     settled++;
   });
   return { checked: idx.length, settled: settled };
