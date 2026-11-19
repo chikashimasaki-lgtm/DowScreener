@@ -61,7 +61,7 @@ const EXPORTS = [
   'signalStrength_', 'parseSignalNames_', 'suggestWeight_', 'patternPoints_',
   'marginRegime_', 'regimeFactor_', 'nsRatioTrend_', 'vixMacdSignal_', 'checkMarketConditions_',
   'marginRatioTrend_', 'shiftMarginRatioHistory_', 'marginRatioLabel_', 'parseYahooJpMarginDate_',
-  'parseTseMarginGrid_', 'parseJpxMtcurrentGrid_', 'parseJpxMtcurrentLinks_', 'parseNikkeiEpsHtml_', 'selloffFrequency_', 'macroValueLabel_',
+  'parseTseMarginGrid_', 'parseJpxMtcurrentGrid_', 'parseJpxMtcurrentLinks_', 'parseTradersWebMargin_', 'parseNikkeiEpsHtml_', 'selloffFrequency_', 'macroValueLabel_',
   'filterCalendarToUniverse_', 'calendarStatusLabel_', 'edinetExtractArray_', 'calendarMapFromEntries_',
   'pickForeignFlow_', 'extractProfit_',
   'tickSize_', 'roundToTick_', 'priceLimit_', 'dowSwings_', 'pullbackLow_', 'buildOrderPlan_',
@@ -518,6 +518,22 @@ console.log('\n【9b】parseJpxMtcurrentGrid_ — JPX週次 mtcurrent.xlsx（202
   eq(M.parseJpxMtcurrentGrid_([['信用取引残高合計', '株数', 1, 2]]), null, '行が足りなければ null');
   const links = M.parseJpxMtcurrentLinks_('<a href="/a/20261009_mtcurrent.xlsx"></a><a href="/a/20261016_mtcurrent.xlsx"></a><a href="/a/20261016_mtcurrent.xlsx"></a>');
   eq(links.map(l => l.ymd).join(','), '20261016,20261009', 'リンクは新しい順・重複なし');
+}
+
+console.log('\n【9c】parseTradersWebMargin_ — トレーダーズ・ウェブ（2026/11/13・11/06の実値）');
+{
+  const tr = (cells) => '<tr>' + cells.map(c => '<td class="x">\n  ' + c + '\n</td>').join('') + '</tr>';
+  const html = '<table><tr><th>申込日</th></tr>'
+    + tr(['2026/11/13', '356', '<span class="positive">+24.4</span>', '6,600', '<span>+465.1</span>', '3,396', '<span>-64.3</span>', '57,681', '<span>-1,128.3</span>', '<span class="negative">-15.49</span>', '8.74'])
+    + tr(['2026/11/06', '332', '-16.8', '6,134', '-303.7', '3,460', '-194.1', '58,809', '-6,248.9', '-21.08', '9.59'])
+    + tr(['11/13', 'x']) + '</table>';
+  const m = M.parseTradersWebMargin_(html);
+  eq(Object.keys(m).length, 2, '日付行だけ2件読む（見出し・短い行は無視）');
+  eq(m['2026/11/13'].pl, -15.49, '11/13の評価損益率 -15.49');
+  eq(m['2026/11/13'].ratio, 8.74, '11/13の信用倍率 8.74');
+  eq(m['2026/11/13'].sellOku, 6600, '売り金額は億円で6,600（JPXの660,000百万円と一致）');
+  eq(m['2026/11/06'].pl, -21.08, '11/06の評価損益率 -21.08');
+  eq(Object.keys(M.parseTradersWebMargin_('')).length, 0, '空文字は空');
 }
 
 console.log('\n【9】parseTseMarginGrid_ — JPX二市場信用取引現在高');
