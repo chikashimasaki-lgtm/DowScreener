@@ -13,7 +13,7 @@
 
 const PT_SHEET_ = '仮想売買';
 const PT_HEADERS_ = ['記録日', 'コード', '銘柄名', '確度', '買い(翌寄付)', '利確', '損切り', '株数',
-  '状態', '決済日', '決済価格', '損益(円)', '損益%', '保有日数', '現在価格', '含み益(円)'];
+  '状態', '決済日', '決済価格', '損益(円)', '損益%', '保有日数', '現在値', '含み益(円)'];
 const PT_COL_ = { DATE: 1, CODE: 2, NAME: 3, GRADE: 4, ENTRY: 5, TARGET: 6, STOP: 7, SHARES: 8,
   STATE: 9, EXIT_DATE: 10, EXIT: 11, PNL: 12, PCT: 13, DAYS: 14, CUR: 15, UNREAL: 16 };
 const PT_SUM_COL_ = PT_HEADERS_.length + 1;   // 集計欄は表の右（見出しの次の列から2列）
@@ -68,11 +68,12 @@ function paperUnrealized_(entry, lastClose, shares) {
 }
 
 /**
- * 既存の台帳に「現在価格」列が無ければ、含み益(円)の左に1列挿入する（2026-11-19）。
+ * 既存の台帳に「現在値」列が無ければ、含み益(円)の左に1列挿入する（2026-11-19）。
  * 挿入で右の集計欄も1列右へ動く（数式の参照は自動で追従）。見出しの書式は隣の列から写す。他のセルは触らない。
  */
 function paperEnsureColumns_(sh) {
   const c = PT_COL_.CUR;
+  if (sh.getRange(1, c).getValue() === '現在価格') sh.getRange(1, c).setValue(PT_HEADERS_[c - 1]);   // 売買プランの「現在値」に語句を揃えた（2026-11-19）
   if (sh.getRange(1, c).getValue() === PT_HEADERS_[c - 1]) return;
   if (sh.getRange(1, c).getValue() === '含み益(円)') {   // 旧レイアウト: 現在価格を挟む
     ensureSheetSize_(sh, 2, sh.getMaxColumns() + 1);
@@ -122,6 +123,14 @@ function paperBodyColor_(sh) {
   [C.DATE, C.GRADE, C.STATE, C.EXIT_DATE].forEach(c => col(c).setHorizontalAlignment('center'));
   col(C.NAME).setHorizontalAlignment('left');
   sh.getRange(7, PT_SUM_COL_ + 1).setNumberFormat('#,##0');
+}
+
+/** コード列に TradingView 日足チャートへのリンクを張る（売買プランと同じ。値は文字列のまま）。並べ替えのあとに呼ぶ。 */
+function paperLinkCodes_(sh) {
+  const last = paperLastRow_(sh);
+  if (last < 2) return;
+  const rng = sh.getRange(2, PT_COL_.CODE, last - 1, 1);
+  rng.setRichTextValues(rng.getDisplayValues().map(r => [codeLinkRichText_(r[0])]));
 }
 
 /** 台帳を記録日の新しい順に並べる（集計欄は動かさない）。 */
@@ -192,6 +201,7 @@ function recordPaperTrades_(targets, plans) {
   sh.getRange(start, 1, rows.length, PT_HEADERS_.length).setValues(rows);
   sh.getRange(start, PT_COL_.CODE, rows.length, 1).setNumberFormat('@');
   paperSort_(sh);
+  paperLinkCodes_(sh);
   return rows.length;
 }
 
@@ -235,7 +245,7 @@ function updatePaperTrades_() {
       if (ev.days) sh.getRange(row, PT_COL_.DAYS).setValue(ev.days);
       const entry = ev.entry != null ? ev.entry : Number(r[PT_COL_.ENTRY - 1]);
       const lastClose = after.length ? after[after.length - 1].c : 0;
-      sh.getRange(row, PT_COL_.CUR).setValue(lastClose > 0 ? lastClose : '');   // 現在価格 = 最新終値
+      sh.getRange(row, PT_COL_.CUR).setValue(lastClose > 0 ? lastClose : '');   // 現在値 = 最新終値
       sh.getRange(row, PT_COL_.UNREAL).setValue(paperUnrealized_(entry, lastClose, Number(r[PT_COL_.SHARES - 1])));
       return;
     }
@@ -244,9 +254,10 @@ function updatePaperTrades_() {
     sh.getRange(row, PT_COL_.STATE, 1, 6).setValues([[ev.state, exitDate, ev.exitPrice == null ? '' : ev.exitPrice,
       pnl.yen, pnl.pct, ev.days || '']]);
     sh.getRange(row, PT_COL_.CUR).setValue('');
-    sh.getRange(row, PT_COL_.UNREAL).setValue('');   // 決済したら現在価格・含み益は消す（損益(円)に確定）
+    sh.getRange(row, PT_COL_.UNREAL).setValue('');   // 決済したら現在値・含み益は消す（損益(円)に確定）
     settled++;
   });
+  paperLinkCodes_(sh);   // 並べ替えで外れたリンクを張り直す
   return { checked: idx.length, settled: settled };
 }
 
