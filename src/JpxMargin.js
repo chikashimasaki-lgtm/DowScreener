@@ -124,23 +124,38 @@ function ensureJpx2MarketSheet_() {
   if (sh) return sh;
   sh = ss.insertSheet(JPX_MARGIN.SHEET2);
   const H = JPX_MARGIN.HEADER2;
-  sh.getRange(1, 1, 1, H.length).setValues([H]).setFontWeight('bold').setBackground('#37474F').setFontColor('#FFFFFF');
+  sh.getRange(1, 1, 1, H.length).setValues([H]);
   sh.setColumnWidths(1, H.length, 130);
   sh.setTabColor(JPX_MARGIN.TAB_COLOR);
-  sh.getRange(2, 1, 500, 1).setNumberFormat('yyyy/m/d');
-  sh.getRange(2, 2, 500, 2).setNumberFormat('#,##0');
-  sh.getRange(2, 4, 500, 1).setNumberFormat('0.00');
-  sh.getRange(2, 5, 500, 1).setNumberFormat('0.00');
-  sh.getRange(2, 1, 500, 5).setHorizontalAlignment('center');
-  const rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(ISNUMBER($B2),$B2<=' + JPX_MARGIN.RED_SELL_MAX + ')')
-    .setFontColor('#FF0000').setBold(true).setRanges([sh.getRange(2, 2, 500, 1)]).build();
-  // 信用評価損益率(E列)はトレーダーズ・ウェブと同じ符号色：正=赤 #db1616 / 負=青 #003cbe（値のしきい値ではなく符号。CSS .positive/.negative より）
-  const pos = SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setFontColor('#DB1616').setRanges([sh.getRange(2, 5, 500, 1)]).build();
-  const neg = SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0).setFontColor('#003CBE').setRanges([sh.getRange(2, 5, 500, 1)]).build();
-  sh.setConditionalFormatRules([rule, pos, neg]);
-  if (typeof trimSheet_ === 'function') trimSheet_(sh);
+  if (typeof trimSheet_ === 'function') trimSheet_(sh);   // 空白の行・列はカット（SheetSize.js）。以降の書き込みは ensureSheetSize_ を通す
   return sh;
+}
+
+// 表示ルール（毎回当て直す。行が増えても範囲がずれない）:
+//  ・新しい順（日付の降順）・行列の固定なし・金額は3桁カンマ・ヘッダ＋行バンディング（styleSheet_）
+//  ・売り残 8000億円(=800,000百万円)以下は赤字、信用倍率は紫、評価損益率は符号色（正=赤 #db1616 / 負=青 #003cbe）
+function formatJpx2MarketSheet_(sh) {
+  const n = sh.getLastRow();
+  if (n < 2) return;
+  const r = n - 1;
+  sh.getRange(2, 1, r, 5).sort({ column: 1, ascending: false });   // 範囲指定の sort（固定行に頼らない）
+  if (typeof styleSheet_ === 'function') styleSheet_(sh, 5, '#37474F', '#FDF3D8');
+  const body = sh.getRange(2, 1, r, 5);
+  body.setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#000000');
+  sh.getRange(2, 1, r, 1).setNumberFormat('yyyy/m/d');
+  sh.getRange(2, 2, r, 2).setNumberFormat('#,##0');
+  sh.getRange(2, 4, r, 2).setNumberFormat('0.00');
+  sh.getRange(2, 4, r, 1).setFontColor('#7030A0');
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND(ISNUMBER($B2),$B2<=' + JPX_MARGIN.RED_SELL_MAX + ')')
+      .setFontColor('#FF0000').setRanges([sh.getRange(2, 2, r, 1)]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0)
+      .setFontColor('#DB1616').setRanges([sh.getRange(2, 5, r, 1)]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0)
+      .setFontColor('#003CBE').setRanges([sh.getRange(2, 5, r, 1)]).build(),
+  ];
+  sh.setConditionalFormatRules(rules);
 }
 
 // 直近週を取り込み、2市場信用倍率シートに無い日付だけ追記する（日付昇順）。追記した件数を返す。
@@ -160,7 +175,9 @@ function syncJpx2MarketSheet_() {
     const r = readJpxMtcurrentXlsx_(JPX_MARGIN.BASE + l.href);
     if (!r || !isFinite(r.sell2M)) throw new Error('二市場の値を読めません: ' + l.ymd);
     const d = new Date(Number(l.ymd.slice(0, 4)), Number(l.ymd.slice(4, 6)) - 1, Number(l.ymd.slice(6, 8)));
-    sh.appendRow([d, r.sell2M, r.buy2M, r.ratio2M, '']);
+    if (sh.getLastRow() < 2) { if (typeof ensureSheetSize_ === 'function') ensureSheetSize_(sh, 2, 5); }
+    else sh.insertRowBefore(2);                       // 新しい週を一番上へ（新しい順）
+    sh.getRange(2, 1, 1, 5).setValues([[d, r.sell2M, r.buy2M, r.ratio2M, '']]);
     have[key] = true; added++;
   });
   return added;
@@ -174,7 +191,8 @@ function jpxWeeklyJob() {
   if (pl.note) Logger.log(pl.note);
   const sh = SpreadsheetApp.getActive().getSheetByName(JPX_MARGIN.SHEET2);
   if (!sh || sh.getLastRow() < 2) return 0;
-  const last = sh.getRange(sh.getLastRow(), 1, 1, 5).getValues()[0];
+  formatJpx2MarketSheet_(sh);                       // 表示ルールを毎回当て直す（並び・書式・条件付き書式）
+  const last = sh.getRange(2, 1, 1, 5).getValues()[0];   // 新しい順なので2行目が最新週
   const key = Utilities.formatDate(new Date(last[0]), 'Asia/Tokyo', 'yyyy/MM/dd');
   const props = PropertiesService.getScriptProperties();
   if (props.getProperty('JPX2M_MAILED') === key) { Logger.log('JPX 2市場信用倍率: ' + key + ' は送信済み'); return 0; }
