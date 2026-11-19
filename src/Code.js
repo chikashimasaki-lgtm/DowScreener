@@ -2113,8 +2113,10 @@ function writePlanSheet_(targets) {
   sh.getRange(2, 1, n, 1).setHorizontalAlignment('center').setVerticalAlignment('middle');
   sh.getRange(2, 2, n, 1).setHorizontalAlignment('right');
   sh.getRange(2, 9, n, 1).setFontColor('#c0392b');    // 損切り額は赤（失う側の金額だと分かるように）
-  sh.setColumnWidth(10, 220); sh.getRange(2, 10, n, 1).setWrap(true).setVerticalAlignment('top');
-  sh.setColumnWidth(11, 320); sh.getRange(2, 11, n, 1).setWrap(true).setVerticalAlignment('top');
+  sh.setColumnWidth(10, 220);  // 幅固定:折り返し長文列
+  sh.getRange(2, 10, n, 1).setWrap(true).setVerticalAlignment('top');
+  sh.setColumnWidth(11, 320);  // 幅固定:折り返し長文列
+  sh.getRange(2, 11, n, 1).setWrap(true).setVerticalAlignment('top');
 
   const all = sh.getRange(2, 1, n, PLAN_HEADERS_.length);
   const kind = sh.getRange(2, 1, n, 1);
