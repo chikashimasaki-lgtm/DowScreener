@@ -743,7 +743,7 @@ function getSbiHeldCodes_() {
     const findCol = cands => data[hi].findIndex(v => cands.indexOf(String(v || '').trim()) >= 0);
     const qi = findCol(HELD_QTY_HEADERS_);
     const pi = findCol(HELD_COST_HEADERS_);
-    const ni = findCol(['銘柄名', '銘柄']);   // 銘柄シートに無いETF等の名前を補う
+    const ni = findCol(['銘柄名称', '銘柄名', '銘柄']);   // 銘柄シートに無いETF等の名前を補う
     let hit = 0;
     for (let r = hi + 1; r < data.length; r++) {
       const s = to4_(String(data[r][ci] || '').trim()).toUpperCase();   // 5桁→4桁に正規化
