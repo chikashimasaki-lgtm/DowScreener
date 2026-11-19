@@ -1184,7 +1184,7 @@ function setupMacroSheets_() {
     ];
     input.getRange(1, 1, seed.length, 3).setValues(seed);
     try { styleSheet_(input, 3, '#141a33', '#eef1fb'); autoFit_(input, 3); } catch (e) {}
-    input.setColumnWidth(1, 300);
+    input.setColumnWidth(1, 300);  // 幅固定:A列の項目名を300pxに抑える（入力シートの見た目）
     input.getRange(2, 3, seed.length - 1, 1).setNumberFormat('yyyy/MM/dd');
     applyMacroValidation_(input, seed.length);
     input.setTabColor('#8e44ad');
