@@ -526,8 +526,8 @@ function fetchPricesByDateRange_(fromStr, toStr, key) {
   return map;
 }
 
-function fmtDate_(d) { return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'); }
-function parseDate_(s) { var p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function fmtDate_(d) { return DateUtils.dashJst(d); }
+function parseDate_(s) { return DateUtils.parseDashLax(s); }
 
 // J-Quants V2 の GET（x-api-key・ページング・配列抽出）。失敗時 null。
 function jqGet_(path, params, key) {

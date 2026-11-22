@@ -81,6 +81,7 @@ const EXPORTS = [
 ];
 // 共通モジュール（symlink）も読み込む。本体が fetchWithRetry_ / confirmDestructive_ / to4_ を呼ぶため。
 const M = new Function(...Object.keys(sandbox), `
+${read('DateUtils.js')}
 ${read('FetchRetry.js')}
 ${read('ConfirmUi.js')}
 ${read('MobileMenu.js')}

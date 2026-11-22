@@ -77,6 +77,7 @@ const EXPORTS = [
   'ML', 'wilsonInterval_', 'decideWeight_',
 ];
 const M = new Function(...Object.keys(sandbox), `
+${read('DateUtils.js')}
 ${read('FetchRetry.js')}
 ${read('ConfirmUi.js')}
 ${read('StockCode.js')}
