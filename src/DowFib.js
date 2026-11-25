@@ -280,6 +280,7 @@ function claspJpxFetchTry() {
 
 // 診断用: JPX直取得→履歴シート追記を1回実行して、最新週の値を返す。
 function claspJpxSync() { return syncJpxMarginHistory_(); }
+function claspJpx1570Fill() { ensureJpx2MarketSheet_(); var r = fillJpx2Market1570_(); formatJpx2MarketSheet_(SpreadsheetApp.getActive().getSheetByName(JPX_MARGIN.SHEET2)); return r; }   // 診断: 1570列を埋めて書式を当てる（メールは送らない）
 
 // 診断用（読み取り専用）: 2市場信用倍率シートの全行と、相場マクロの売残欄を返す。
 function claspJpxHistory() {
