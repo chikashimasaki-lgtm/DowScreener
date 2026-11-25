@@ -8,7 +8,7 @@ const JPX_MARGIN = {
   STALE_DAYS: 14,     // 申込み日からこの日数を超えたら「古い」と警告
   TAB_COLOR: '#795548',
   SHEET2: '2市場信用倍率',
-  HEADER2: ['日付', '売り残(百万円)', '買い残(百万円)', '信用倍率', '信用評価損益率'],
+  HEADER2: ['日付', '売り残(百万円)', '買い残(百万円)', '信用倍率', '信用評価損益率', '1570信用倍率'],
   TW_URL: 'https://www.traders.co.jp/margin_derivatives/margin_transition',  // 信用評価損益率の取得元（JPXには無い）
   RED_SELL_MAX: 800000,   // 売り残がこの値(百万円＝8000億円)以下なら赤字
 };
@@ -90,7 +90,16 @@ function syncJpxMarginHistory_() {
 function ensureJpx2MarketSheet_() {
   const ss = SpreadsheetApp.getActive();
   let sh = ss.getSheetByName(JPX_MARGIN.SHEET2);
-  if (sh) return sh;
+  if (sh) {
+    // 既存シートに F列（1570信用倍率）が無ければ、見出しだけ足す（既存の行・書式には触れない）
+    const nh = JPX_MARGIN.HEADER2.length;
+    if (sh.getRange(1, nh).getValue() !== JPX_MARGIN.HEADER2[nh - 1]) {
+      if (typeof ensureSheetSize_ === 'function') ensureSheetSize_(sh, Math.max(sh.getLastRow(), 2), nh);
+      sh.getRange(1, nh).setValue(JPX_MARGIN.HEADER2[nh - 1]);
+      sh.setColumnWidth(nh, 130);   // 幅固定:既存の他列（130）と揃える
+    }
+    return sh;
+  }
   sh = ss.insertSheet(JPX_MARGIN.SHEET2);
   const H = JPX_MARGIN.HEADER2;
   sh.getRange(1, 1, 1, H.length).setValues([H]);
@@ -107,14 +116,15 @@ function formatJpx2MarketSheet_(sh) {
   const n = sh.getLastRow();
   if (n < 2) return;
   const r = n - 1;
-  sh.getRange(2, 1, r, 5).sort({ column: 1, ascending: false });   // 範囲指定の sort（固定行に頼らない）
-  if (typeof styleSheet_ === 'function') styleSheet_(sh, 5, '#37474F', '#FDF3D8');
-  const body = sh.getRange(2, 1, r, 5);
+  sh.getRange(2, 1, r, 6).sort({ column: 1, ascending: false });   // 範囲指定の sort（固定行に頼らない）
+  if (typeof styleSheet_ === 'function') styleSheet_(sh, 6, '#37474F', '#FDF3D8');
+  const body = sh.getRange(2, 1, r, 6);
   body.setHorizontalAlignment('center').setFontWeight('bold').setFontColor('#000000');
   sh.getRange(2, 1, r, 1).setNumberFormat('yyyy/m/d');
   sh.getRange(2, 2, r, 2).setNumberFormat('#,##0');
   sh.getRange(2, 4, r, 2).setNumberFormat('0.00');
   sh.getRange(2, 4, r, 1).setFontColor('#7030A0');
+  sh.getRange(2, 6, r, 1).setNumberFormat('0.00').setFontColor('#7030A0');   // 1570信用倍率（信用倍率と同じ紫）
   const rules = [
     SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied('=AND(ISNUMBER($B2),$B2<=' + JPX_MARGIN.RED_SELL_MAX + ')')
@@ -144,7 +154,7 @@ function syncJpx2MarketSheet_() {
     const r = readJpxMtcurrentXlsx_(JPX_MARGIN.BASE + l.href);
     if (!r || !isFinite(r.sell2M)) throw new Error('二市場の値を読めません: ' + l.ymd);
     const d = new Date(Number(l.ymd.slice(0, 4)), Number(l.ymd.slice(4, 6)) - 1, Number(l.ymd.slice(6, 8)));
-    if (sh.getLastRow() < 2) { if (typeof ensureSheetSize_ === 'function') ensureSheetSize_(sh, 2, 5); }
+    if (sh.getLastRow() < 2) { if (typeof ensureSheetSize_ === 'function') ensureSheetSize_(sh, 2, 6); }
     else sh.insertRowBefore(2);                       // 新しい週を一番上へ（新しい順）
     sh.getRange(2, 1, 1, 5).setValues([[d, r.sell2M, r.buy2M, r.ratio2M, '']]);
     have[key] = true; added++;
@@ -158,10 +168,12 @@ function jpxWeeklyJob() {
   const added = syncJpx2MarketSheet_();
   const pl = fillJpx2MarketPl_();   // 空きの評価損益率は毎回埋め直す
   if (pl.note) Logger.log(pl.note);
+  const r1570 = fillJpx2Market1570_();   // 1570信用倍率（Yahoo。公表週が一致する行だけ）
+  if (r1570.note) Logger.log(r1570.note);
   const sh = SpreadsheetApp.getActive().getSheetByName(JPX_MARGIN.SHEET2);
   if (!sh || sh.getLastRow() < 2) return 0;
   formatJpx2MarketSheet_(sh);                       // 表示ルールを毎回当て直す（並び・書式・条件付き書式）
-  const last = sh.getRange(2, 1, 1, 5).getValues()[0];   // 新しい順なので2行目が最新週
+  const last = sh.getRange(2, 1, 1, 6).getValues()[0];   // 新しい順なので2行目が最新週
   const key = Utilities.formatDate(new Date(last[0]), 'Asia/Tokyo', 'yyyy/MM/dd');
   const props = PropertiesService.getScriptProperties();
   if (props.getProperty('JPX2M_MAILED') === key) { Logger.log('JPX 2市場信用倍率: ' + key + ' は送信済み'); return 0; }
@@ -178,6 +190,7 @@ function jpxWeeklyJob() {
     '売り残: ' + Number(last[1]).toLocaleString('en-US') + ' 百万円' + (low ? '  ★8000億円以下（赤）' : ''),
     '買い残: ' + Number(last[2]).toLocaleString('en-US') + ' 百万円',
     '信用倍率: ' + last[3],
+    '1570信用倍率: ' + (last[5] !== '' && last[5] != null ? last[5] : '未取得'),
     '信用評価損益率: ' + (ready ? last[4] + '%' : '未取得（トレーダーズ・ウェブ未掲載のまま7日経過）'),
     pl.note ? '※' + pl.note : '',
     '',
@@ -236,4 +249,25 @@ function fillJpx2MarketPl_() {
     filled++;
   });
   return { filled: filled, note: bad.length ? '信用評価損益率: JPXの値と合わず未入力 ' + bad.join(',') : '' };
+}
+
+// 2市場信用倍率シートの F列（1570信用倍率）を、Yahoo Finance Japan の値で埋める。
+// Yahoo は「最新の公表回」の値と更新日(MM/DD＝申込日)しか持たないので、過去の週は遡れない（空欄のまま）。
+// 更新日が行の日付(MM/dd)と一致する、F列が空の行だけに書く（別の週の値を入れない）。
+// 返り値 { filled: 0|1, note: 失敗・不一致の説明（無ければ ''） }
+function fillJpx2Market1570_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(JPX_MARGIN.SHEET2);
+  if (!sh || sh.getLastRow() < 2) return { filled: 0, note: '' };
+  const f = fetch1570MarginRatio_();
+  if (f.error) return { filled: 0, note: '1570信用倍率: ' + f.error };
+  if (!f.date) return { filled: 0, note: '1570信用倍率: Yahooの更新日を読めず未入力' };
+  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, 6).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const key = Utilities.formatDate(new Date(rows[i][0]), 'Asia/Tokyo', 'MM/dd');
+    if (key !== f.date) continue;
+    if (rows[i][5] !== '' && rows[i][5] != null) return { filled: 0, note: '' };
+    sh.getRange(i + 2, 6).setValue(f.ratio);
+    return { filled: 1, note: '' };
+  }
+  return { filled: 0, note: '1570信用倍率: Yahooの更新日 ' + f.date + ' に当たる週がシートに無く未入力' };
 }
